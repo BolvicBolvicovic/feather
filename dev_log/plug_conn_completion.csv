@@ -1,0 +1,25 @@
+FunctionName,StateOfDevelopment
+get_http_protocol,not neeed
+get_peer_data,todo
+halt,to test
+inform,todo
+merge_assigns,to test
+merge_private,todo
+merge_req_headers,to test
+merge_resp_headers,to test
+prepend_req_headers,todo
+prepend_resp_headers,todo
+put_resp_content_type,todo
+put_status,todo
+read_body,todo
+read_part_body,todo
+read_part_headers,todo
+register_before_send,todo
+request_url,todo
+resp,todo
+send_chunked,todo
+send_file,todo
+send_resp,todo
+update_req_header,todo
+update_resp_header,todo
+upgrade_adapter,todo
