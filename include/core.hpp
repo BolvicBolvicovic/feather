@@ -4,6 +4,15 @@
 /*--- httplib for server ---*/
 #include <httplib.h>
 
+/*--- websocket ---*/
+#include <websocketpp/server.hpp>
+#include <websocketpp/config/asio_no_tls.hpp>
+
+/*--- Boost includes for UUID ---*/
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+
 /*--- Boost includes for process ---*/
 #include <boost/process/v2/pid.hpp>
 
@@ -15,6 +24,7 @@
 
 /*--- Immer includes for immutable data structures ---*/
 #include <immer/vector.hpp>
+#include <immer/vector_transient.hpp>
 #include <immer/map.hpp>
 #include <immer/map_transient.hpp>
 #include <immer/set.hpp>
@@ -27,6 +37,7 @@
 #include <variant>
 #include <utility>
 #include <any>
+#include <mutex>
 
 namespace process = boost::process::v2; // From <boost/process/v2/pid.hpp>
 namespace http = httplib;
@@ -164,7 +175,8 @@ inline Container2 reduce(
     return result;
 }
 
-}
+} // namespace functional
+
 /*--- SharedString ---*/
 // A shortcut for a const string in a shared pointer
 using SharedString = std::shared_ptr<std::string const>;
@@ -190,6 +202,7 @@ enum struct ResultType
 {
     Ok,
     Err,
+    More,
 };
 
 template <typename Value>
@@ -233,13 +246,13 @@ inline ImmutVecString BuildPathInfo(std::string const& target)
 {
     boost::char_separator<char> const sep("/");
     boost::tokenizer<boost::char_separator<char>> tok(target, sep);
-    ImmutVecString vec;
+    auto vec = ImmutVecString().transient();
 
     for (auto beg = tok.begin(); beg != tok.end(); ++beg)
     {
-        vec = vec.push_back(std::make_shared<std::string const>(*beg));
+        vec.push_back(std::make_shared<std::string const>(*beg));
     }
-    return vec;
+    return vec.persistent();
 }
 
 /*--- GetPortFromHost ---*/
@@ -282,7 +295,7 @@ inline ImmutMapString ParseCookie(std::string const& cookie)
 {
     boost::char_separator<char> const sep(";");
     boost::tokenizer<boost::char_separator<char>> tok(cookie, sep);
-    ImmutMapString map;
+    auto map = ImmutMapString().transient();
 
     for (auto it = tok.begin(); it != tok.end(); ++it)
     {
@@ -308,12 +321,11 @@ inline ImmutMapString ParseCookie(std::string const& cookie)
                 continue;
             }
             
-            //std::cout << "key: " << key << " value: " << value << std::endl;
-            map = map.set(key, ShareStr(value));
+            map.set(key, ShareStr(value));
         }
     }
 
-    return map;
+    return map.persistent();
 }
 
 /*--- ErrorType ---*/
@@ -435,9 +447,14 @@ using ConnState = std::variant<Sent, Unsent>;
 // Helper for the return type of the getters for Headers.
 using HeaderRange = std::pair<http::Headers::const_iterator, http::Headers::const_iterator>;
 
-/*--- Connection ---*/
-// A Connection represents the equivalent of a Plug.Conn in the Phoenix Framework.
-// Templating is necessary to work with sessions. The default case is provided for CookieSessions.
+/*--- Conn ---*/
+/*
+    This module defines a struct and the main functions for working
+    with requests and responses in an HTTP connection.
+    
+    Note request headers are normalized to lowercase
+    and response headers are expected to have lowercase keys.
+*/
 struct Conn
 {
 private:
@@ -468,12 +485,14 @@ public:
     SharedString    method;
     ImmutVecString  path_info;
     ImmutVecString  script_name;
+    SharedString    request_url;
     SharedString    request_path;
     std::optional<int const>        port;
     std::array<int const, 4> const  remote_ip;
     http::Headers                   req_headers;
     SharedString    scheme;
     SharedString    query_string;
+    SharedString    req_body;
 
     // Fetchable fields
     std::optional<ImmutMapString> cookies;
@@ -490,6 +509,7 @@ public:
     std::optional<int>                      status;
 
     // Connection fields
+    immer::vector<std::function<Conn const(Conn const&)>>   callbacks_before_send;
     immer::map<std::string, std::any>       assigns;
     process::pid_type const                 owner;
     bool                                    halted;
@@ -505,12 +525,14 @@ public:
     method(ShareStr(req.method)),
     path_info(BuildPathInfo(req.path)),
     script_name(/*TODO: extract path from route in application*/),
+    request_url(ShareStr(req.target)),
     request_path(ShareStr(req.path)),
     port(GetPortFromHost(*host)),
     remote_ip({127, 0, 0, 1}/*TODO: default to peer's IP*/),
     req_headers(req.headers),
     scheme(ShareStr(req.version)/*TODO: find a way to choose between ws, wss and https*/),
     query_string(GetQueryFromTarget(req.target)),
+    req_body(ShareStr(req.body)),
     owner(process::current_pid()),
     halted(false),
     secret_key_base(/*TODO: generate key from a crypto lib*/),
@@ -710,8 +732,84 @@ public:
         }
         else
         {
+            new_conn.req_headers.erase(key);
             new_conn.req_headers.insert({key, value});
         }
+        return { ResultType::Ok, new_conn };
+    }
+    
+    /*- update_req_header -*/
+    /*
+        Updates a request header if present, otherwise it sets it to an initial value.
+
+        Returns an error if the connection has already been sent, chunked or upgraded.
+
+        Only the first value of the header key is updated if present.
+    */
+    static Result<Conn const> update_req_header(
+        Conn const& conn,
+        std::string const& key,
+        std::string const& initial,
+        std::function<std::string(std::string const&)> func)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+
+        Conn new_conn(conn);
+
+        if (auto handle = new_conn.req_headers.extract(key); handle.empty())
+        {
+            handle.key() = key;
+            handle.mapped() = initial;
+            new_conn.req_headers.insert(std::move(handle));
+        }
+        else
+        {
+            handle.mapped() = func(handle.mapped());
+            new_conn.req_headers.insert(std::move(handle));
+        }
+
+        return { ResultType::Ok, new_conn };
+    }
+
+    /*- prepend_req_headers -*/
+    /*
+        Prepends the list of headers to the connection request headers.
+
+        Similar to put_req_header this functions adds a new request header (key) 
+        but rather than replacing the existing one it prepends another header with the same key.
+        If key is "host", the host parameter of the connection is updated instead.
+
+        Because header keys are case-insensitive in HTTP/1.1,
+        it is recommended for header keys to be in lowercase,
+        to avoid sending duplicate keys in a request.
+        
+        As a convenience, when using the Plug.Adapters.Conn.Test adapter,
+        any headers that aren't lowercase will raise a Plug.Conn.InvalidHeaderError.
+
+        Returns an error if the connection has already been sent, chunked or upgraded.
+    */
+    static Result<Conn const> prepend_req_headers(Conn const& conn, http::Headers&& headers)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+
+        Conn new_conn(conn);
+
+        if (auto host = headers.find("host"); host != headers.end())
+        {
+            new_conn.host = ShareStr(host->second);
+            headers.erase("host");
+        }
+        new_conn.req_headers.merge(std::move(headers));
         return { ResultType::Ok, new_conn };
     }
 
@@ -722,7 +820,7 @@ public:
 
         Returns an error if the connection has already been sent, chunked or upgraded. 
     */
-    static Result<Conn const> merge_req_headers(Conn const& conn, ImmutMapString const& headers)
+    static Result<Conn const> merge_req_headers(Conn const& conn, http::Headers&& headers)
     {
         if (std::holds_alternative<Sent>(conn.state)
             || std::get<Unsent>(conn.state) == Unsent::CHUNKED
@@ -730,18 +828,17 @@ public:
         {
             return { ResultType::Err, conn };
         }
-        Conn new_conn(conn);
 
-        for (auto const& [key, value] : headers)
+        Conn new_conn(conn);
+        if (auto host = headers.find("host"); host != headers.end())
         {
-            if (key == "host")
-            {
-                new_conn.host = value;
-            }
-            else
-            {
-                new_conn.req_headers.insert({key, *value});
-            }
+            new_conn.host = ShareStr(host->second);
+            headers.erase("host");
+        }
+        for (auto&& hd : headers)
+        {
+            new_conn.req_headers.erase(hd.first);
+            new_conn.req_headers.insert(std::move(hd));
         }
         return { ResultType::Ok, new_conn };
     }
@@ -965,6 +1062,58 @@ public:
         return { ResultType::Ok, new_conn };
     }
 
+    /*- merge_resp_headers -*/
+    /*
+        Merges a series of response headers into the connection.
+
+        Returns an error if the connection has already been sent, chunked or upgraded. 
+    */
+    static Result<Conn const> merge_resp_headers(Conn const& conn, http::Headers&& headers)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+
+        Conn new_conn(conn);
+        for (auto&& hd : headers)
+        {
+            new_conn.resp_headers.erase(hd.first);
+            new_conn.resp_headers.insert(std::move(hd));
+        }
+        return { ResultType::Ok, new_conn };
+    }
+
+    /*- prepend_resp_header -*/
+    /*
+        Prepends the list of headers to the connection response headers.
+
+        Similar to put_resp_header this functions adds a new response header (key)
+        but rather than replacing the existing one it prepends another header
+        with the same key.
+
+        It is recommended for header keys to be in lowercase,
+        to avoid sending duplicate keys in a request.
+
+        Returns an error if the connection has already been sent, chunked or upgraded.
+
+    */
+    static Result<Conn const> prepend_resp_header(Conn const& conn, http::Headers&& headers)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+
+        Conn new_conn(conn);
+        new_conn.resp_headers.merge(std::move(headers));
+        return { ResultType::Ok, new_conn };
+    }
+
     /*- put_resp_header -*/
     /*
         Adds a new response header (key) if not present,
@@ -989,6 +1138,7 @@ public:
         }
 
         Conn new_conn(conn);
+        new_conn.resp_headers.erase(key);
         new_conn.resp_headers.insert({key, value});
         return { ResultType::Ok, new_conn };
     }
@@ -1010,6 +1160,44 @@ public:
 
         Conn new_conn(conn);
         new_conn.resp_headers.erase(key);
+        return { ResultType::Ok, new_conn };
+    }
+
+    /*- update_resp_header -*/
+    /*
+        Updates a response header if present, otherwise it sets it to an initial value.
+
+        Returns an error if the connection has already been sent, chunked or upgraded.
+
+        Only the first value of the header key is updated if present.
+    */
+    static Result<Conn const> update_resp_header(
+        Conn const& conn,
+        std::string const& key,
+        std::string const& initial,
+        std::function<std::string(std::string const&)> func)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+
+        Conn new_conn(conn);
+
+        if (auto handle = new_conn.resp_headers.extract(key); handle.empty())
+        {
+            handle.key() = key;
+            handle.mapped() = initial;
+            new_conn.resp_headers.insert(std::move(handle));
+        }
+        else
+        {
+            handle.mapped() = func(handle.mapped());
+            new_conn.resp_headers.insert(std::move(handle));
+        }
+
         return { ResultType::Ok, new_conn };
     }
 
@@ -1049,13 +1237,405 @@ public:
         new_conn.halted = true;
         return new_conn;
     }
+
+    /*- put_resp_content_type -*/
+    /*
+        Sets the value of the "content-type" response header taking into account the charset.
+
+        If charset is "none", the value of the "content-type" response header
+        won't specify a charset.    
+    */
+    static Conn const put_resp_content_type(Conn const& conn, std::string const& content_type, std::string const& charset = "utf-8")
+    {
+        std::string content = charset == "none"
+            ? content_type
+            : content_type + "; charset=" + charset;
+        return put_resp_header(conn, "Content-Type", content) CHAIN( unwrap );
+    }
+
+    /*- put_status -*/
+    /*
+        Stores the given status code in the connection.
+        
+        Returns an error if the connection has already been sent, chunked or upgraded.
+    */
+    static Result<Conn const> put_status(Conn const& conn, uint32_t status)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            return { ResultType::Err, conn };
+        }
+        Conn new_conn(conn);
+
+        new_conn.status = std::make_optional(status);
+        return { ResultType::Ok, new_conn };
+    }
+
+    /*- read_body -*/
+    /*
+        Reads the request body.
+
+        This function reads a chunk of the request body up to a given length
+        (specified by the length option). If there is more data to be read,
+        then {ResultType::More, {partial_body, conn}} is returned.
+        Otherwise {ResultType::Ok, {body, conn}} is returned.
+        In case of an error reading the socket, {ResultType::Err, {reason, conn}} is returned.
+
+        Like all functions in this module, the conn returned by read_body must be passed
+        to the next stage of your pipeline and should not be ignored.
+
+        In order to, for instance, support slower clients you can tune the
+        "read_length" and "read_timeout" options.
+        These specify how much time should be allowed to pass for each read from the underlying socket.
+
+        Because the request body can be of any size, reading the body will only work once,
+        as feather::plug will not cache the result of these operations.
+        If you need to access the body multiple times, it is your responsibility to store it.
+
+        This function is able to handle both chunked and identity transfer-encoding by default.
+        Options:
+            - "length"      : sets the maximum number of bytes to read from the body on every call, defaults to 8_000_000 bytes
+            - "read_length" : sets the amount of bytes to read at one time from the underlying socket to fill the chunk, defaults to 1_000_000 bytes
+            - "read_timeout": sets the timeout for each socket read, defaults to 15_000 milliseconds
+        
+        The values above are not meant to be exact.
+        For example, setting the length to 8_000_000 may end up reading
+        some hundred bytes more from the socket until we halt.
+    */
+    static Result<std::pair<std::string, Conn const>> read_body(Conn const& conn, ImmutMapString&& opts = {})
+    {
+        std::string body = "";
+        auto const opt_len = opts.find("length");
+        int const max_len = opt_len == nullptr
+            ? 8000000
+            : std::stof(**opt_len);
+        (void)max_len; // TODO
+        return {ResultType::Ok, {body, conn}};
+    }
+
+    /*- register_before_send -*/
+    /*
+        Registers a callback to be invoked before the response is sent.
+        Callbacks are invoked in the order they are defined.
+    */
+    static Conn const register_before_send(Conn const& conn, std::function<Conn const(Conn const&)> callback)
+    {
+        if (std::holds_alternative<Sent>(conn.state))
+        {
+            throw std::logic_error("Conn already sent");
+        }
+        
+        Conn new_conn(conn);
+
+        new_conn.callbacks_before_send = new_conn.callbacks_before_send.push_back(callback);
+
+        return new_conn;
+    }
+
+    /*- resp -*/
+    /*
+        Sets the response to the given status and body.
+
+        It sets the connection state to set (if not already set) 
+        raises an error if it was already sent, chunked or upgraded.
+
+        If you also want to send the response, use send_resp/1 after this
+        or use send_resp/3.
+    */
+    static Conn const resp(Conn const& conn, uint32_t status, std::string const& body)
+    {
+        if (std::holds_alternative<Sent>(conn.state)
+            || std::get<Unsent>(conn.state) == Unsent::CHUNKED
+            || std::get<Unsent>(conn.state) == Unsent::UPGRADED)
+        {
+            throw std::logic_error("Conn already sent");
+        }
+
+        Conn new_conn(conn);
+
+        new_conn.state = Unsent::SET;
+        new_conn.status = std::make_optional(status);
+        new_conn.req_body = ShareStr(body);
+
+        return new_conn;
+    }
+
+    /*- upgrade_conn -*/
+    /*
+        Request a protocol upgrade from the server.
+    */
+    static Conn const upgrade_conn(Conn const& conn, std::string const& protocol/*, immer::set<std::string> args = {}*/)
+    {
+        Conn new_conn(conn);
+
+        new_conn.status = std::make_optional(426);
+        new_conn.resp_headers.insert({"Upgrade", protocol});
+        new_conn.resp_headers.insert({"Connection", "Upgrade"});
+
+        new_conn.state = Unsent::UPGRADED;
+        return new_conn;
+    }
 };
 
 typedef std::optional<std::vector<SharedString>> PlugOptions;
 
 typedef std::function<Conn(Conn, PlugOptions)> Plug;
 
-}
-}
+} // namespace plug
+
+struct Server
+{
+    using WebSocketServer = websocketpp::server<websocketpp::config::asio>;
+    using ConnectionHdl = websocketpp::connection_hdl;
+
+    struct User
+    {
+        std::shared_ptr<plug::Session>  session;
+        ConnectionHdl                   hdl;
+    };
+
+    private:
+        WebSocketServer                                     server;
+        std::mutex                                          conn_lock;
+        boost::uuids::random_generator                      uuid_generator;
+        std::function<plug::Conn const(plug::Conn const&)>  router;
+        std::unordered_map<std::string, User>               connections;
+    public:
+        Server(std::function<plug::Conn const(plug::Conn const&)> router_handler)
+        :
+        router(router_handler)
+        {
+            server.clear_access_channels(websocketpp::log::alevel::all);
+            server.init_asio();
+
+            server.set_http_handler([this](ConnectionHdl hdl)
+            {
+                using namespace feather::core::plug;
+                using namespace websocketpp::http;
+
+
+                auto req = 
+                    server.get_con_from_hdl(hdl)->get_request().raw()
+                    pipe Server::parse_request
+                    pipe unwrap<http::Request>;
+
+                auto req_cpy = req;
+                auto session = std::make_shared<CookieSession>();
+                
+                Conn conn = [&](Conn const& c) {
+                    auto req_with_cookies = Conn::fetch_cookies(c);
+                    if (auto const& _id = req_with_cookies.req_cookies.value().find("id"); _id != nullptr)
+                    {
+                        std::lock_guard<std::mutex> lock(conn_lock);
+                        return Conn(std::move(req), connections[**_id].session);
+                    }
+                    else
+                    {
+                        std::string id = uuid_generator() pipe boost::uuids::to_string;
+
+                        std::lock_guard<std::mutex> lock(conn_lock);
+                        connections[id] = {session, hdl};
+                        return Conn::put_resp_cookie(c, "id", id).second;
+                    }
+
+                }(Conn(std::move(req_cpy), session));
+                
+                auto ready_for_resp = router(conn);
+
+                auto response = server.get_con_from_hdl(hdl)->get_response();
+                
+                auto status = ready_for_resp.status.value_or(200);
+                response.set_status(static_cast<status_code::value>(status));
+
+                response.set_max_body_size(8000000);
+
+                if (ready_for_resp.resp_body.use_count() != 0)
+                {
+                    response.set_body(*ready_for_resp.resp_body);
+                }
+
+                for (auto const& [key, value] : ready_for_resp.resp_headers)
+                {
+                    response.append_header(key, value);
+                }
+
+                for (auto [key, cookie] : ready_for_resp.resp_cookies)
+                {
+                    std::string set_cookie = "";
+                    if (auto const& value = cookie.find("value"); value != nullptr)
+                    {
+                        set_cookie += **value;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (auto const& path = cookie.find("path"); path != nullptr)
+                    {
+                        set_cookie += "; Path=" + **path;
+                    }
+                    else
+                    {
+                        set_cookie += "; Path=/";
+                    }
+
+                    if (auto const& domain = cookie.find("domain"); domain != nullptr)
+                    {
+                        set_cookie += "; Domain=" + **domain;
+                    }
+
+                    if (auto const& max_age = cookie.find("max_age"); max_age != nullptr)
+                    {
+                        set_cookie += "; Max-Age=" + **max_age;
+                    }
+
+                    if (auto const& expires = cookie.find("expires"); expires != nullptr)
+                    {
+                        set_cookie += "; Expires=" + **expires;
+                    }
+
+                    if (cookie.find("secure") != nullptr)
+                    {
+                        set_cookie += "; Secure";
+                    }
+
+                    if (cookie.find("httponly") != nullptr)
+                    {
+                        set_cookie += "; HttpOnly";
+                    }
+
+                    if (auto const& same_site = cookie.find("same_site"); same_site != nullptr)
+                    {
+                        set_cookie += "; SameSite=" + **same_site;
+                    }
+
+
+                    response.append_header("Set-Cookie", set_cookie);
+                }
+            });
+
+            server.set_open_handler([this](ConnectionHdl hdl)
+            {
+                std::string id = uuid_generator() pipe boost::uuids::to_string;
+
+                std::lock_guard<std::mutex> lock(conn_lock);
+                connections[id] = {std::make_shared<plug::CookieSession>(), hdl};
+            });
+
+            server.set_message_handler([this](ConnectionHdl hdl, WebSocketServer::message_ptr)
+            {
+                /*TODO: change all of this to Phoenix Channel*/
+                using namespace feather::core::plug;
+
+                auto user = [&]()
+                {
+                    for (auto const& conn : connections)
+                    {
+                        if (server.get_con_from_hdl(conn.second.hdl) == server.get_con_from_hdl(hdl))
+                        {
+                            return conn.second;
+                        }
+                    }
+                    throw std::runtime_error("Conn is not recorded");
+                }();
+                
+                auto req = 
+                    server.get_con_from_hdl(hdl)->get_request().raw()
+                    pipe Server::parse_request
+                    pipe unwrap<http::Request>;
+
+                Conn conn(std::move(req), user.session);
+                conn.state = Unsent::UPGRADED;
+                router(conn);
+            });
+        }
+        ~Server() = default;
+
+        /*- parse_request-*/
+        /*
+            Parse a raw request into an http::Request
+        */
+        static Result<http::Request> parse_request(std::string const& raw)
+        {
+            http::Request req;
+            boost::char_separator sep("\r\n");
+            boost::char_separator line_sep(" ");
+            bool first_line = true;
+            bool is_body = false;
+            boost::tokenizer<boost::char_separator<char>> tok(raw, sep);
+
+            for (auto const& line : tok)
+            {
+                auto len = line.length();
+
+                if (first_line)
+                {
+                    if (len == 0)
+                    {
+                        return { ResultType::Err, req };
+                    }
+                    boost::tokenizer<boost::char_separator<char>> t_line(line, line_sep);
+                    size_t count = 0;
+                    for (auto const& word : t_line)
+                    {
+                        switch (count)
+                        {
+                            case 0: req.method = word; break;
+                            case 1: req.target = word; break;
+                            case 2: req.version = word; break;
+                            default: break;
+                        }
+
+                        // Skip URL fragment
+                        req.target.erase(req.target.find('#'));
+
+                        auto question_mark = req.target.find("?");
+                        req.path = req.target.substr(0, question_mark);
+
+                        ++count;
+                    }
+                    static const std::set<std::string> methods
+                    {
+                        "GET", "HEAD", "POST", "PUT", "DELETE",
+                        "CONNECT", "OPTION", "TRACE", "PATCH", "PRI"
+                    };
+
+                    if (methods.find(req.method) == methods.end()
+                        || (req.version != "HTTP/1.1"
+                            && req.version != "HTTP/1.0"))
+                    {
+                        return { ResultType::Err, req };
+                    }
+                }
+                else if (len == 0)
+                {
+                    is_body = true;
+                }
+                else if (is_body)
+                {
+                    req.body.append(line + "\r\n");
+                }
+                else
+                {
+                    auto double_dot = line.find(":");
+                    std::string key = line.substr(0, double_dot);
+                    std::string value =
+                        line.substr(double_dot + 1)
+                        CHAIN( boost::trim_copy );
+                    req.headers.emplace(key, value);
+                }
+
+                first_line = false;
+            }
+
+            return {ResultType::Ok, req};
+        }
+};
+
+
+} // namespace core
 
 #endif
