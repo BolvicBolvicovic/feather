@@ -1379,7 +1379,7 @@ public:
     }
 };
 
-typedef std::optional<std::vector<SharedString>> PlugOptions;
+typedef immer::vector<std::string> PlugOptions;
 
 typedef std::function<Conn(Conn, PlugOptions)> Plug;
 
