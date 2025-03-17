@@ -1,7 +1,7 @@
 #ifndef CORE_TEST_HPP
 #define CORE_TEST_HPP
 
-#include "../../include/core.hpp"
+#include <feather/core.hpp>
 
 #include <assert.h>
 

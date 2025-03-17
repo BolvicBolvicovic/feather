@@ -1,5 +1,5 @@
-#include "./include/core_test.hpp"
-#include "./include/router_test.hpp"
+#include <core_test.hpp>
+#include <router_test.hpp>
 
 int main()
 {

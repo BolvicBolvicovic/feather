@@ -3,7 +3,7 @@
 #ifndef ROUTER_HPP
 #define ROUTER_HPP
 
-#include "core.hpp"
+#include <feather/core.hpp>
 
 
 namespace feather::router

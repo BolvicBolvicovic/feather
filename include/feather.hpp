@@ -5,5 +5,7 @@
 #ifndef FEATHER_H
 #define FEATHER_H
 
+#include <feather/core.hpp>
+#include <feather/router.hpp>
 
 #endif
