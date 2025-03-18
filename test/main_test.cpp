@@ -4,5 +4,6 @@
 int main()
 {
     run_core_test();
+    run_router_test();
     return 0;
 }

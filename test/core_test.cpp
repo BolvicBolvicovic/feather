@@ -1,12 +1,13 @@
 #include <core_test.hpp>
 #include <iostream>
 
-static core::plug::Conn const  buildFirstConn(void)
+core::plug::Conn const  buildFirstConn(void)
 {
     using namespace core::plug;
 
     http::Request req;
     req.path = "/users/123";
+    req.method = "get";
     req.target = "/users/123?test=tested&patate=douce";
     req.params.emplace("format", "json");
     req.headers.emplace("Authorization", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -251,6 +252,34 @@ static void ParseCookie_test(void)
     assert(parsed_cookie["HttpOnly"] == nullptr);
 }
 
+static void multimap_test(void)
+{
+    using namespace core::functional;
+    multimap<std::string, std::string> mm({std::pair{"test", "success"}, {"test", "perfect"}});
+
+    assert(mm.empty() == false);
+    assert(mm.count("test") == 2);
+    assert(mm["test"].size() == 2);
+    assert(mm.at("test").size() == 2);
+    assert(*mm.find("test") == "success");
+}
+
+static void run_core_functional_test(void)
+{
+    size_t test_count = 0;
+    std::function<void(void)> const functional_tests[] = 
+    {
+        multimap_test,
+    };
+    for (auto const& test : functional_tests)
+    {
+        test_count++;
+        test();
+    }
+    std::cout << "core::functional tests: " << test_count << " success." << std::endl;
+
+}
+
 static void run_core_plug_test(void)
 {
     size_t test_count = 0;
@@ -281,11 +310,12 @@ void run_core_test(void)
     std::function<void(void)> const core_tests[] =
     {
         pipe_test,
+        run_core_functional_test,
         run_core_plug_test,
     };
     for (auto const& test: core_tests)
     {
         test();
     }
-    std::cout << "All core tests pass!" << std::endl;
+    std::cout << "All core tests pass!" << "\n\n";
 }

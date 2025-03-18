@@ -5,4 +5,8 @@
 
 #include <feather/router.hpp>
 
+void run_router_test(void);
+
+feather::core::plug::Conn const  buildFirstConn(void);
+
 #endif

@@ -9,7 +9,7 @@ LFLAGS = -L. -l$(LIB_NAME)
 SRCS =  router
 
 TEST = test.exe
-TEST_CPP = $(addprefix test/, $(addsuffix _test.cpp, $(SRCS) main core))
+TEST_CPP = $(addprefix test/, $(addsuffix _test.cpp,  main core $(SRCS)))
 TEST_O = $(TEST_CPP:.cpp=.o)
 
 # Templates

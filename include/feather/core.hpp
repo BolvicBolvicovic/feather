@@ -142,6 +142,10 @@ namespace feather::core
 
 namespace functional
 {
+
+/*--- reduce ---*/
+// Execute a 
+
 /*--- merge ---*/
 // Merges two immer::map into a single one.
 template<typename K, typename V>
@@ -174,6 +178,265 @@ inline Container2 reduce(
 
     return result;
 }
+
+/*--- multimap ---*/
+/*
+    Immutable multimap container. Based on immer::map.
+*/
+template<typename Key, typename Value>
+struct multimap
+{
+    using key_type        = Key;
+    using mapped_type     = Value;
+    using value_type      = std::pair<Key, Value>;
+    using size_type       = size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference       = value_type const&;
+    using const_reference = value_type const&;
+    using iterator        = typename immer::map<Key, std::vector<Value>>::iterator;
+    using const_iterator  = iterator;
+    using transient_type  = immer::map_transient<Key, std::vector<Value>>;
+
+    private:
+        immer::map<Key, std::vector<Value>> container;
+    public:
+        /* Constructor */
+        /*
+            Constructs an immutable multimap containing the elements in values. 
+            If two values have the same key, the second value will also be appended to the key.
+        */
+        multimap(std::initializer_list<value_type> values)
+        {
+            multimap::transient_type  tmm;
+
+            for (auto const& [key, value]: values)
+            {
+                tmm.update(key, [&value](std::vector<Value> vec) { vec.push_back(value); return vec; });
+            }
+
+            this->container = tmm.persistent();
+        }
+        multimap()                = default;
+        multimap(multimap const&) = default;
+        multimap(multimap&&)      = default;
+        ~multimap()               = default;
+
+        multimap& operator=(multimap const&) = default;
+        multimap& operator=(multimap&&)      = default;
+
+        /*-- begin --*/
+        /*
+            Returns an iterator pointing at the first element of the collection.
+            It does not allocate memory and its complexity is O(1).
+        */
+        iterator begin() const
+        {
+            return this->container.begin();
+        }
+
+        /*-- end --*/
+        /*
+            Returns an iterator pointing just after the last element of the collection.
+            It does not allocate and its complexity is O(1). 
+        */
+        iterator end() const
+        {
+            return this->container.end();
+        }
+
+        /*-- size --*/
+        /*
+            Returns the number of elements in the container.
+            It does not allocate memory and its complexity is O(1) 
+        */
+        size_type size() const
+        {
+            size_t s = 0;
+
+            for (auto const& vec : this->container)
+            {
+                s += vec.second.size();
+            }
+            return s;
+        }
+
+        /*-- empty --*/
+        /*
+            Returns true if there are no elements in the container.
+            It does not allocate memory and its complexity is O(1)
+        */
+        bool empty() const
+        {
+            return this->container.empty();
+        }
+
+        /*-- count --*/
+        /*
+            Returns the size of the vector mapped with the key when it is contained in the multimap or 0 otherwise.
+            It won’t allocate memory and its complexity is effectively O(1).
+        */
+        size_type count(Key const& key) const
+        {
+            size_t s = 0;
+            if (auto vec = this->container.find(key); vec != nullptr)
+            {
+                s = vec->size();
+            }
+            return s;
+        }
+
+        /*-- operator[] --*/
+        /*
+            Returns a const reference to the vector containing the values associated to the key k.
+            If the key is not contained in the multimap, it returns a default constructed vector<Value>.
+            It does not allocate memory and its complexity is effectively O(1). 
+        */
+        std::vector<Value> const& operator[](Key const& key) const
+        {
+            static std::vector<Value> const null_vec;
+            if (auto vec = this->container.find(key); vec != nullptr)
+            {
+                return *vec;
+            }
+            else
+            {
+                return null_vec;
+            }
+        }
+
+        /*-- at --*/
+        /*
+            Returns a const reference to the vector containing the values associated to the key k.
+            If the key is not contained in the multimap, throws an std::out_of_range error.
+            It does not allocate memory and its complexity is effectively O(1). 
+        */
+        std::vector<Value> const& at(Key const& key) const
+        {
+            if (auto vec = this->container.find(key); vec != nullptr)
+            {
+                return *vec;
+            }
+            else
+            {
+                throw std::out_of_range("");
+            }
+        }
+
+        /*-- find --*/
+        /*
+            Returns a pointer to the first value associated with the key k.
+            If the key is not contained in the multimap, a nullptr is returned.
+            It does not allocate memory and its complexity is effectively O(1)
+
+            If you are interested why this function does not return an iterator, check the immer::map documentation.
+        */
+        Value const* find(Key const& key) const
+        {
+            if (auto vec = this->container.find(key); vec != nullptr)
+            {
+                std::string const& val = (*vec)[0];
+                return &val;
+            }
+            else
+            {
+                return nullptr;
+            }
+        }
+
+        /*-- operator== --*/
+        /*
+            Returns whether the multimaps are equal.
+        */
+        bool operator==(multimap const& mm) const
+        {
+            return this->container == mm.container;
+        }
+
+        /*-- operator!= --*/
+        /*
+            Returns whether the multimaps are not equal.
+        */
+        bool operator!=(multimap const& mm)
+        {
+            return this->container != mm.container;
+        }
+
+        /*-- insert --*/
+        /*
+            Returns a multimap containing the association value.
+            If the key is already in the multimap, it replaces appends the value to its value vector.
+            It may allocate memory and its complexity is effectively O(1). 
+        */
+        multimap insert(value_type value) const
+        {
+            std::vector<Value> vec;
+            multimap<Key, Value> cpy;
+            if (auto key = this->container.find(value.first); key != nullptr)
+            {
+                vec = *key;
+            }
+            vec.push_back(value.second);
+            
+            cpy.container = this->container.insert({value.first, vec});
+            return cpy;
+        }
+
+        /*-- set --*/
+        /*
+            Returns a multimap containing the association (k, v).
+            If the key is already in the multimap, it replaces appends the value to its value vector.
+            It may allocate memory and its complexity is effectively O(1).  
+        */
+        multimap set(key_type k, value_type v) const
+        {
+            std::vector<Value> vec;
+            multimap<Key, Value> cpy;
+            if (auto key = this->container.find(k); key != nullptr)
+            {
+                vec = *key;
+            }
+            vec.push_back(v);
+            
+            cpy.container = this->container.insert({k, vec});
+            return cpy;
+        }
+
+        /*-- erase --*/
+        /*
+            Returns a map without the key k.
+            If the key is not associated in the map it returns the same map.
+            It may allocate memory and its complexity is effectively O(1). 
+        */
+        multimap erase(key_type k) const
+        {
+            if (this->container.find(k) != nullptr)
+            {
+                multimap<Key, Value> cpy;
+                cpy.container = this->container.erase(k);
+                return cpy;
+            }
+            return *this;
+        }
+        
+        /*-- transient --*/
+        /*
+            TODO:
+            Returns a transient form of this container, a multimap_transient.
+        */
+
+        /*-- identity --*/
+        /*
+            Returns a value that can be used as identity for the container.
+            If two values have the same identity, they are guaranteed to be equal
+            and to contain the same objects.
+            However, two equal containers are not guaranteed to have the same identity.
+        */
+        void* identity() const
+        {
+            return this->container.identity();
+        }
+};
+
 
 } // namespace functional
 
@@ -522,7 +785,7 @@ public:
     session(s),
     session_copy(s->shared_clone()),
     host(ShareStr(req.get_header_value("Host"))),
-    method(ShareStr(req.method)),
+    method(ShareStr(boost::to_lower_copy(req.method))),
     path_info(BuildPathInfo(req.path)),
     script_name(/*TODO: extract path from route in application*/),
     request_url(ShareStr(req.target)),
@@ -543,7 +806,10 @@ public:
     Conn(Conn const&)            = default;
     Conn(Conn&&)                 = default;
     Conn& operator=(Conn&&)      = default;
-    Conn& operator=(Conn const&) = default;
+    Conn operator=(Conn const& other)
+    {
+        return Conn(other);
+    };
     ~Conn()                      = default;
 
     /*- assign -*/
@@ -1592,8 +1858,9 @@ struct Server
                         // Skip URL fragment
                         req.target.erase(req.target.find('#'));
 
+                        auto slash_mark = req.target.find("/");
                         auto question_mark = req.target.find("?");
-                        req.path = req.target.substr(0, question_mark);
+                        req.path = req.target.substr(slash_mark, question_mark);
 
                         ++count;
                     }
