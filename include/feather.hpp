@@ -6,6 +6,8 @@
 #define FEATHER_H
 
 #include <feather/core.hpp>
+#include <feather/server.hpp>
+#include <feather/controller.hpp>
 #include <feather/router.hpp>
 
 #endif

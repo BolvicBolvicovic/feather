@@ -6,7 +6,7 @@ CC = g++-14
 CPPFLAGS = -c -Wall -Wextra -Werror
 LFLAGS = -L. -l$(LIB_NAME)
 
-SRCS =  router
+SRCS =  router controller server
 
 TEST = test.exe
 TEST_CPP = $(addprefix test/, $(addsuffix _test.cpp,  main core $(SRCS)))
@@ -56,7 +56,7 @@ generate:
 	fi;\
 	if [ -n "$$module" ]; then \
 		UPPER=$$(echo $$module | tr '[:lower:]' '[:upper:]'); \
-		mkdir -p src include test/include;\
+		mkdir -p include test/include;\
 		echo '/*--- Header file for '$$module' ---*/' > include/feather/$$module.hpp;\
 		echo '' >> include/feather/$$module.hpp;\
 		echo '#ifndef '"$$UPPER"'_HPP' >> include/feather/$$module.hpp; \
