@@ -92,14 +92,20 @@ public:
     RouterMultiMap  scopes;
     Router()              = default;
     Router(Router&&)      = default;
-    Router(Router const&) = default;
+    Router(Router const& other) :
+    pipelines(other.pipelines),
+    scopes(other.scopes){}
     ~Router()             = default;
 
-    Router operator=(Router const& other)
+    Router& operator=(Router const& other)
     {
-        return Router(other);
+        if (this != &other)
+        {
+            pipelines = other.pipelines;
+            scopes = other.scopes;
+        }
+        return *this;
     }
-
     /*- pipeline -*/
     /*
         Once a request arrives at the Phoenix router,
@@ -157,7 +163,6 @@ public:
 \
     for (auto const& p_name : p_lines_as_vec)\
     {\
-        std::cout << "Pipeline name: " << p_name << std::endl;\
         for (auto const& pip : router.pipelines[p_name])\
         {\
             new_conn = pip(new_conn, {});\
@@ -205,12 +210,10 @@ static Router router;
 */
 inline plug::Conn const router_handler(plug::Conn const& conn)
 {
-    std::cout << "scopes size: " << router.scopes.size() << std::endl;
     for (auto const& [scope_id, scopes] : router.scopes)
     {
         if (auto path_start = conn.request_path->find(scope_id); path_start == std::string::npos)
         {
-            std::cout << "scope " << scope_id << " not found" << std::endl;
             continue;
         }
         else
@@ -240,7 +243,6 @@ inline plug::Conn const router_handler(plug::Conn const& conn)
                     return scope.pipeline(conn, {}) pipe scope.del[path];
                 }
             }
-
         }
 
     }

@@ -1,8 +1,10 @@
+/*--- Header file for core ---*/
+
 #ifndef CORE_HPP
 #define CORE_HPP
 
 /*--- httplib for server ---*/
-#include <httplib.h>
+#include <httplib.h> // TODO: change the parsing of the request so httplib would not be necessary
 
 /*--- websocket ---*/
 #include <websocketpp/server.hpp>
@@ -750,9 +752,9 @@ public:
     ImmutVecString  script_name;
     SharedString    request_url;
     SharedString    request_path;
-    std::optional<int const>        port;
-    std::array<int const, 4> const  remote_ip;
-    http::Headers                   req_headers;
+    std::optional<int>  port;
+    std::array<int, 4>  remote_ip;
+    http::Headers   req_headers;
     SharedString    scheme;
     SharedString    query_string;
     SharedString    req_body;
@@ -774,7 +776,7 @@ public:
     // Connection fields
     immer::vector<std::function<Conn const(Conn const&)>>   callbacks_before_send;
     immer::map<std::string, std::any>       assigns;
-    process::pid_type const                 owner;
+    process::pid_type                       owner;
     bool                                    halted;
     SharedString                            secret_key_base;
     ConnState                               state;
@@ -806,10 +808,44 @@ public:
     Conn(Conn const&)            = default;
     Conn(Conn&&)                 = default;
     Conn& operator=(Conn&&)      = default;
-    Conn operator=(Conn const& other)
+    Conn& operator=(Conn const& other)
     {
-        return Conn(other);
-    };
+        if (this != &other)
+        {
+            session = other.session ? other.session->clone() : nullptr;
+            session_copy = other.session_copy ? other.session_copy->clone() : nullptr;
+            session_info = other.session_info;
+            host = other.host;
+            method = other.method;
+            path_info = other.path_info;
+            script_name = other.script_name;
+            request_url = other.request_url;
+            request_path = other.request_path;
+            port = other.port;
+            remote_ip = other.remote_ip;
+            req_headers = other.req_headers;
+            scheme = other.scheme;
+            query_string = other.query_string;
+            req_body = other.req_body;
+            cookies = other.cookies;
+            req_cookies = other.req_cookies;
+            body_params = other.body_params;
+            query_params = other.query_params;
+            path_params = other.path_params;
+            params = other.params;
+            resp_body = other.resp_body;
+            resp_cookies = other.resp_cookies;
+            resp_headers = other.resp_headers;
+            status = other.status;
+            callbacks_before_send = other.callbacks_before_send;
+            assigns = other.assigns;
+            owner = other.owner;
+            halted = other.halted;
+            secret_key_base = other.secret_key_base;
+            state = other.state;
+        }
+        return *this;
+    }
     ~Conn()                      = default;
 
     /*- assign -*/

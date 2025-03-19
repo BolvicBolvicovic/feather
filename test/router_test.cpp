@@ -15,7 +15,6 @@ void Router_pipeline_test(void)
             {
                 PLUG( vec, Conn::fetch_cookies );
                 PLUG( vec, Conn::fetch_query_params );
-
                 return vec;
             }))
         CHAIN( Router::pipeline, "test2",
@@ -48,6 +47,7 @@ void Router_pipeline_test(void)
     
     Conn conn = buildFirstConn() pipe router_handler;
     
+    assert(*conn.method == "get");
     assert(conn.cookies.has_value());
 }
 
