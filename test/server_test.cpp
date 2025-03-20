@@ -25,12 +25,11 @@ void Server_parse_request_test(void)
     assert(result.first == ResultType::Ok);
     
     auto& request = result.second;
-    std::cout << "body: " << request.body << std::endl;
     assert(request.body == "This is the body");
     assert(request.get_header_value("Host") == "example.com");
     assert(request.version == "HTTP/1.1");
     assert(request.method == "GET");
-    assert(request.path == "/api/product/1234");
+    assert(request.path == "/api/products/1234");
 
 }
 

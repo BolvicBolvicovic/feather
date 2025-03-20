@@ -185,7 +185,7 @@ struct Server
         static Result<http::Request> parse_request(std::string const& raw)
         {
             http::Request req;
-            boost::char_separator sep("\r\n");
+            boost::char_separator sep("\n");
             boost::char_separator line_sep(" ");
             bool first_line = true;
             bool is_body = false;
@@ -197,7 +197,7 @@ struct Server
 
                 if (first_line)
                 {
-                    if (len == 0)
+                    if (len == 1)
                     {
                         return { ResultType::Err, req };
                     }
@@ -209,7 +209,7 @@ struct Server
                         {
                             case 0: req.method = word; break;
                             case 1: req.target = word; break;
-                            case 2: req.version = word; break;
+                            case 2: req.version = word.substr(0, word.length() - 1); break;
                             default: break;
                         }
 
@@ -222,7 +222,6 @@ struct Server
                         req.target.erase(pos);
                     }
 
-                    std::cout << "target: " << req.target << std::endl;
                     auto slash_mark = req.target.find("/");
                     if (auto const& question_mark = req.target.find("?"); question_mark != std::string::npos)
                     {
@@ -243,29 +242,32 @@ struct Server
                         || (req.version != "HTTP/1.1"
                             && req.version != "HTTP/1.0"))
                     {
+                        std::cout << "Error version" << std::endl;
                         return { ResultType::Err, req };
                     }
                 }
-                else if (len == 0)
+                else if (len == 1)
                 {
                     is_body = true;
                 }
                 else if (is_body)
                 {
-                    req.body.append(line + "\r\n");
+                    req.body.append(line + "\n");
                 }
                 else
                 {
                     auto double_dot = line.find(":");
                     std::string key = line.substr(0, double_dot);
                     std::string value =
-                        line.substr(double_dot + 1)
+                        line.substr(double_dot + 1, len - 1)
                         CHAIN( boost::trim_copy );
                     req.headers.emplace(key, value);
                 }
 
                 first_line = false;
             }
+
+            req.body.erase(req.body.rfind("\n"));
 
             return {ResultType::Ok, req};
         }

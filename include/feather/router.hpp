@@ -182,7 +182,7 @@ public:
 \
     for (auto const& p_name : p_lines_as_vec)\
     {\
-        for (auto const& pip : router.pipelines[p_name])\
+        for (auto const& pip : feather::router::router.pipelines[p_name])\
         {\
             new_conn = pip(new_conn, {});\
         }\
