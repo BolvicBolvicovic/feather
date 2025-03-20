@@ -7,5 +7,6 @@ int main()
 {
     run_core_test();
     run_router_test();
+    run_server_test();
     return 0;
 }

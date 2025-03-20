@@ -5,45 +5,51 @@
 using namespace feather::router;
 using namespace feather::core::plug;
 
-
-void Router_pipeline_test(void)
+void Router_init_test(void)
 {
     router =
         Router()
         CHAIN( Router::pipeline, "test1",
-            (+[](RouterVecTransient& vec) -> RouterVecTransient&
+            (CALLBACK_PLINE
             {
-                PLUG( vec, Conn::fetch_cookies );
-                PLUG( vec, Conn::fetch_query_params );
-                return vec;
+                PLUG( Conn::fetch_cookies );
+                PLUG( Conn::fetch_query_params );
+
+                END_PLINE;
             }))
         CHAIN( Router::pipeline, "test2",
-            (+[](RouterVecTransient& vec) -> RouterVecTransient&
+            (CALLBACK_PLINE
             {
-                PLUG( vec, Conn::assign, "key_test", 42);
+                PLUG( Conn::assign, "key_test", 42 );
 
-                return vec;
+                END_PLINE;
             }))
         CHAIN( Router::scope, "/",
-            (+[](Scope&& s, Router const& r)
+            (CALLBACK_SCOPE
             {
-                PIPE_THROUGH( s, r, "test1", "test2" );
+                PIPE_THROUGH( "test1", "test2" );
 
-                GET( s, "/posts/new", nullptr );
-                POST( s, "/posts", nullptr );
+                GET( "/posts/new", nullptr );
+                POST( "/posts", nullptr );
 
-                return s;
+                END_SCOPE;
             }))
         CHAIN( Router::scope, "/",
-            (+[](Scope&& s, Router const& r)
+            (CALLBACK_SCOPE
             {
-                PIPE_THROUGH( s, r, "test1" );
+                PIPE_THROUGH( "test1" );
 
-                GET( s, "/posts", nullptr );
-                GET( s, "/users/123", nullptr );
+                GET( "/posts", nullptr );
+                GET( "/users/123", nullptr );
 
-                return s;
+                END_SCOPE;
             }));
+    
+    assert(router.scopes["/"][1].pipeline != nullptr);
+}
+
+void Router_router_handler_test(void)
+{
     
     Conn conn = buildFirstConn() pipe router_handler;
     
@@ -54,7 +60,8 @@ void Router_pipeline_test(void)
 void run_router_test(void)
 {
     std::function<void(void)> const tests[] = {
-        Router_pipeline_test,
+        Router_init_test,
+        Router_router_handler_test,
     };
     size_t counter = 0;
 

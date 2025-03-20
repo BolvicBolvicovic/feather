@@ -3,9 +3,11 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include <feather/core.hpp>
+#include <feather/router.hpp>
 
-using namespace feather::core;
+
+namespace feather::core
+{
 
 struct Server
 {
@@ -25,9 +27,9 @@ struct Server
         std::function<plug::Conn const(plug::Conn const&)>  router;
         std::unordered_map<std::string, User>               connections;
     public:
-        Server(std::function<plug::Conn const(plug::Conn const&)> router_handler)
+        Server()
         :
-        router(router_handler)
+        router(router::router_handler)
         {
             server.clear_access_channels(websocketpp::log::alevel::all);
             server.init_asio();
@@ -211,15 +213,26 @@ struct Server
                             default: break;
                         }
 
-                        // Skip URL fragment
-                        req.target.erase(req.target.find('#'));
-
-                        auto slash_mark = req.target.find("/");
-                        auto question_mark = req.target.find("?");
-                        req.path = req.target.substr(slash_mark, question_mark);
-
                         ++count;
                     }
+
+                    // Skip URL fragment
+                    if (auto const& pos = req.target.find('#'); pos != std::string::npos)
+                    {
+                        req.target.erase(pos);
+                    }
+
+                    std::cout << "target: " << req.target << std::endl;
+                    auto slash_mark = req.target.find("/");
+                    if (auto const& question_mark = req.target.find("?"); question_mark != std::string::npos)
+                    {
+                        req.path = req.target.substr(slash_mark, question_mark);
+                    }
+                    else
+                    {
+                        req.path = req.target.substr(slash_mark);
+                    }
+                    
                     static const std::set<std::string> methods
                     {
                         "GET", "HEAD", "POST", "PUT", "DELETE",
@@ -256,5 +269,7 @@ struct Server
 
             return {ResultType::Ok, req};
         }
-};
+}; // struct Server
+
+} // namespace core
 #endif

@@ -5,4 +5,6 @@
 
 #include <feather/server.hpp>
 
+void run_server_test(void);
+
 #endif

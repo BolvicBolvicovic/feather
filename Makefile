@@ -3,7 +3,7 @@
 SHELL := /bin/bash
 
 CC = g++-14
-CPPFLAGS = -c -Wall -Wextra -Werror
+CPPFLAGS = -g -c -Wall -Wextra -Werror
 LFLAGS = -L. -l$(LIB_NAME)
 
 SRCS =  router controller server

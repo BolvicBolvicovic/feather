@@ -45,39 +45,39 @@ using RouterMultiMap = core::functional::multimap<std::string, Scope>;
         static auto const my_router =
             Router()
             CHAIN( Router::pipeline, "test1",
-                (+[](RouterVecTransient& vec) -> RouterVecTransient&
+                (CALLBACK_PLINE
                 {
-                    PLUG( vec, Conn::fetch_cookies );
-                    PLUG( vec, Conn::fetch_query_params );
+                    PLUG( Conn::fetch_cookies );
+                    PLUG( Conn::fetch_query_params );
 
-                    return vec;
+                    END_PLINE;
                 }))
             CHAIN( Router::pipeline, "test2",
-                (+[](RouterVecTransient& vec) -> RouterVecTransient&
+                (CALLBACK_PLINE
                 {
-                    PLUG( vec, Conn::assign, "key_test", 42);
+                    PLUG( Conn::assign, "key_test", 42 );
 
-                    return vec;
+                    END_PLINE;
                 }))
             CHAIN( Router::scope, "/",
-                (+[](Scope&& s, Router const& r)
+                (CALLBACK_SCOPE
                 {
-                    PIPE_THROUGH( s, r, "test1", "test2" );
+                    PIPE_THROUGH( "test1", "test2" );
 
-                    GET( s, "/posts/new", my_controller::new );
-                    POST( s, "/posts", my_constroller::post );
+                    GET( "/posts/new", nullptr );
+                    POST( "/posts", nullptr );
 
-                    return s;
+                    END_SCOPE;
                 }))
             CHAIN( Router::scope, "/",
-                (+[](Scope&& s, Router const& r)
+                (CALLBACK_SCOPE
                 {
-                    PIPE_THROUGH( s, r, "test1" );
+                    PIPE_THROUGH( "test1" );
 
-                    GET( s, "/posts", my_controller::index );
-                    GET( s, "/posts/:id", my_controller::show );
+                    GET( "/posts", nullptr );
+                    GET( "/users/123", nullptr );
 
-                    return s;
+                    END_SCOPE;
                 }));
 
         return my_router;
@@ -86,7 +86,7 @@ using RouterMultiMap = core::functional::multimap<std::string, Scope>;
 struct Router
 {
     using Pipeline = std::function<RouterVecTransient&(RouterVecTransient&)>;
-    using IntoScope = std::function<Scope(Scope&&, Router const&)>;
+    using IntoScope = std::function<Scope(Scope&&)>;
 public:
     RouterMap       pipelines;
     RouterMultiMap  scopes;
@@ -140,23 +140,42 @@ public:
     )
     {
         Router new_router(router);
-        new_router.scopes = new_router.scopes.insert({name, handler(Scope(), router)});
+        new_router.scopes = new_router.scopes.insert({name, handler(Scope())});
         return new_router;
     }
+
+    /*- CALLBACK_PLINE -*/
+    /*
+        Macro helper to define a pipeline callback.
+    */
+#define CALLBACK_PLINE +[](RouterVecTransient& vec) -> RouterVecTransient&
 
     /*- PLUG -*/
     /*
         Macro helper for pipeline callback. Allows you to pass an optionable argument to a Plug.
     */
-#define PLUG(vec, func, ...) vec.push_back([&](feather::core::plug::Conn const& conn, feather::core::plug::PlugOptions={}) { return func(conn __VA_OPT__(,) __VA_ARGS__); })
+#define PLUG(func, ...) vec.push_back([&](feather::core::plug::Conn const& conn, feather::core::plug::PlugOptions={}) { return func(conn __VA_OPT__(,) __VA_ARGS__); })
 
+    /*- END_PLINE -*/
+    /*
+        Macro helper to significate the end of a pipeline callback.
+    */
+#define END_PLINE return vec
+
+    /*- CALLBACK_SCOPE -*/
+    /*
+        Macro helper to define a scope callback.
+    */
+#define CALLBACK_SCOPE +[](Scope&& scope)
+
+#define END_SCOPE return scope
 
     /*- PIPE_THROUGH -*/
     /*
         Macro helper to tell to a scope which pipeline(s) should be used before accessing the routes.
         If there are many pipelines, they are called in the order writen.
     */
-#define PIPE_THROUGH(scope, router, p_lines...) scope.pipeline = ([&](feather::core::plug::Conn const& conn, feather::core::plug::PlugOptions={}) \
+#define PIPE_THROUGH(p_lines...) scope.pipeline = ([&](feather::core::plug::Conn const& conn, feather::core::plug::PlugOptions={}) \
 { \
     feather::core::plug::Conn new_conn(conn); \
     std::vector<std::string> p_lines_as_vec{p_lines};\
@@ -175,25 +194,25 @@ public:
     /*
         Macro helper registering a get callback for a scope.
     */
-#define GET(scope, path, handler) scope.get = scope.get.insert({path, handler})
+#define GET(path, handler) scope.get = scope.get.insert({path, handler})
 
     /*- POST -*/
     /*
         Macro helper registering a post callback for a scope.
     */
-#define POST(scope, path, handler) scope.post = scope.post.insert({path, handler})
+#define POST(path, handler) scope.post = scope.post.insert({path, handler})
 
     /*- PUT -*/
     /*
         Macro helper registering a put callback for a scope.
     */
-#define PUT(scope, path, handler) scope.put = scope.put.insert({path, handler})
+#define PUT(path, handler) scope.put = scope.put.insert({path, handler})
 
     /*- DEL -*/
     /*
         Macro helper registering a delete callback for a scope.
     */
-#define DEL(scope, path, handler) scope.del = scope.del.insert({path, handler})
+#define DEL(path, handler) scope.del = scope.del.insert({path, handler})
 
 
 }; // struct router
