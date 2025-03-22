@@ -22,6 +22,12 @@ target_precompile_headers(test_pch
     INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/include/test_pch.hpp
 )
+
+# Configure PCH compilation settings
+set_target_properties(test_pch PROPERTIES JOB_POOL_COMPILE "pch_pool")
+set(CMAKE_JOB_POOL_PRECOMPILE_HEADER "pch_pool")
+set_property(GLOBAL PROPERTY JOB_POOLS pch_pool=1)  # Only use 1 core for PCH compilation
+
 target_include_directories(test_pch
     INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -59,6 +65,16 @@ foreach(test_target ${TEST_TARGETS})
             test_common
     )
     
-    # Register test with CTest
-    catch_discover_tests(${test_target})
+    # Ensure proper build order
+    add_dependencies(${test_target} test_common)
+    
+    # Register test with CTest using Catch2's discovery
+    catch_discover_tests(${test_target}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        REPORTER "console"
+        OUTPUT_ON_FAILURE
+        DISCOVERY_TIMEOUT 60
+        PROPERTIES
+            ENVIRONMENT "CTEST_PARALLEL_LEVEL=2"
+    )
 endforeach() 

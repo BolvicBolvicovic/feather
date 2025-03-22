@@ -10,12 +10,13 @@ NPROC = $(shell nproc)
 # Commands
 
 all: $(BUILD_DIR)
-	@cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) .. && cmake --build . -j$(NPROC)
+	@cd $(BUILD_DIR) && cmake --build . -j$(NPROC)
 	@cd $(BUILD_DIR) && ctest --output-on-failure
 
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
+	@cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) -G Ninja .. 
 
 clean:
 	@rm -rf $(BUILD_DIR)

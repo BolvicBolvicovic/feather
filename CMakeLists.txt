@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)  # Using modern CMake features
 
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif()
+
 # Force CMake to use g++-14 before project() command
 set(CMAKE_CXX_COMPILER "/usr/bin/g++-14" CACHE STRING "C++ compiler" FORCE)
 
@@ -17,6 +22,7 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED OFF)  # Allow falling back to older standards
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_UNITY_BUILD ON)
 
 # Set compiler flags but without -Werror to allow mixed standard code
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

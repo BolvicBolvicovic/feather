@@ -30,6 +30,7 @@
 #include <immer/map.hpp>
 #include <immer/map_transient.hpp>
 #include <immer/set.hpp>
+#include <immer/set_transient.hpp>
 
 #include <array>
 #include <queue>
@@ -275,7 +276,7 @@ struct multimap
         /*-- count --*/
         /*
             Returns the size of the vector mapped with the key when it is contained in the multimap or 0 otherwise.
-            It won’t allocate memory and its complexity is effectively O(1).
+            It won't allocate memory and its complexity is effectively O(1).
         */
         size_type count(Key const& key) const
         {
@@ -459,6 +460,11 @@ using ImmutVecString = immer::vector<SharedString>;
 /*--- ImmutMapString ---*/
 // A shortcut for the most used map
 using ImmutMapString = immer::map<std::string, SharedString>;
+
+/*--- ImmutSetString ---*/
+// A shortcut for an immutable set of strings
+using ImmutSetString = immer::set<std::string>;
+using ImmutSetStringTransient = immer::set_transient<std::string>;
 
 /*--- Result ---*/
 // Similar to Go Result.
