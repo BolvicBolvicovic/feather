@@ -1,50 +1,94 @@
 /*--- Code file for test server ---*/
 
-#include <server_test.hpp>
-
-// Router is initialized in Router_init_test
+#include "test_pch.hpp"
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 using namespace feather::core;
+using namespace plug;
+using namespace test;
+using namespace Catch::Matchers;
 
-void Server_parse_request_test(void)
-{
+SCENARIO("Server Request Parsing", "[server]") {
+    GIVEN("A raw HTTP request") {
+        std::string raw_request = 
+            "GET /test?param=value HTTP/1.1\r\n"
+            "Host: localhost:4000\r\n"
+            "Accept-Language: en-US,en;q=0.5\r\n"
+            "Cookie: session=abc123; user_id=42\r\n"
+            "\r\n"
+            "Hello World";
 
-    std::string raw_request =
-    "GET /api/products/1234 HTTP/1.1\r\n"
-    "Host: example.com\r\n"
-    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n"
-    "Accept: application/json\r\n"
-    "Accept-Language: en-US,en;q=0.9\r\n"
-    "Accept-Encoding: gzip, deflate, br\r\n"
-    "Connection: keep-alive\r\n"
-    "Cookie: session_id=abc123; user_preferences=dark_mode\r\n"
-    "Cache-Control: no-cache\r\n\r\n"
-    "This is the body";
+        WHEN("Parsing the request") {
+            auto result = Server::parse_request(raw_request);
 
-    auto result = Server::parse_request(raw_request);
-    assert(result.first == ResultType::Ok);
-    
-    auto& request = result.second;
-    assert(request.body == "This is the body");
-    assert(request.get_header_value("Host") == "example.com");
-    assert(request.version == "HTTP/1.1");
-    assert(request.method == "GET");
-    assert(request.path == "/api/products/1234");
+            THEN("Request is parsed correctly") {
+                REQUIRE(result.first == ResultType::Ok);
+                REQUIRE_THAT(result.second.method, Equals("GET"));
+                REQUIRE_THAT(result.second.path, Equals("/test"));
+                REQUIRE_THAT(result.second.target, Equals("/test?param=value"));
+                REQUIRE_THAT(result.second.version, Equals("HTTP/1.1"));
+                REQUIRE_THAT(result.second.body, Equals("Hello World"));
+            }
 
+            AND_THEN("Headers are properly parsed") {
+                REQUIRE_THAT(result.second.headers.find("Host")->second, Equals("localhost:4000"));
+                REQUIRE_THAT(result.second.headers.find("Accept-Language")->second, Equals("en-US,en;q=0.5"));
+            }
+        }
+
+        WHEN("Parsing an invalid request") {
+            std::string invalid_request = "INVALID /test HTTP/1.1\r\n";
+            auto result = Server::parse_request(invalid_request);
+
+            THEN("Error is returned") {
+                REQUIRE(result.first == ResultType::Err);
+            }
+        }
+    }
 }
 
-void run_server_test(void)
-{
-    std::function<void(void)> const tests[] = {
-        Server_parse_request_test,
-    };
-    size_t counter = 0;
+SCENARIO("Server WebSocket Handling", "[server]") {
+    GIVEN("A server instance") {
+        Server server;
 
-    for (auto const& test : tests)
-    {
-        test();
-        counter++;
+        WHEN("Handling WebSocket connections") {
+            auto conn = buildFirstConn();
+            conn.state = Unsent::UPGRADED;
+
+            THEN("Connection state is properly set") {
+                REQUIRE(std::holds_alternative<Unsent>(conn.state));
+                REQUIRE(std::get<Unsent>(conn.state) == Unsent::UPGRADED);
+            }
+        }
     }
+}
 
-    std::cout << "server tests: " << counter << " success." << std::endl;
+SCENARIO("Server Cookie Management", "[server]") {
+    GIVEN("A server instance and a connection") {
+        Server server;
+        auto conn = buildFirstConn();
+
+        WHEN("Processing cookies") {
+            conn = Conn::fetch_cookies(conn);
+
+            THEN("Cookies are properly parsed") {
+                REQUIRE(conn.req_cookies.has_value());
+                auto cookies = conn.req_cookies.value();
+                REQUIRE(cookies.find("session") != nullptr);
+                REQUIRE_THAT(**cookies.find("session"), Equals("abc123"));
+                REQUIRE(cookies.find("user_id") != nullptr);
+                REQUIRE_THAT(**cookies.find("user_id"), Equals("42"));
+            }
+        }
+
+        WHEN("Setting response cookies") {
+            conn = Conn::put_resp_cookie(conn, "test", "value")
+                pipe unwrap<Conn>;
+
+            THEN("Response cookies are properly set") {
+                REQUIRE(conn.resp_cookies.find("test") != nullptr);
+                REQUIRE_THAT(*conn.resp_cookies["test"]["value"], ContainsSubstring("value"));
+            }
+        }
+    }
 }

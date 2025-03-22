@@ -2,46 +2,28 @@
 
 SHELL := /bin/bash
 
-CC = g++-14
-CPPFLAGS = -g -c -Wall -Wextra -Werror
-LFLAGS = -L. -l$(LIB_NAME)
-
-SRCS =  router controller server
-
-TEST = test.exe
-TEST_CPP = $(addprefix test/, $(addsuffix _test.cpp,  main core $(SRCS)))
-TEST_O = $(TEST_CPP:.cpp=.o)
-
-# Templates
-
-define CHECK_VAR_TMP
-if [[ -z "$$module" && -z "$$submodule" ]]; then \
-	echo "Usage: make $(1) module=<module or submodule name>";\
-	exit 1;\
-fi;
-endef
+BUILD_DIR = build
+CMAKE_FLAGS = -DCMAKE_CXX_COMPILER=g++-14
+# Detect number of CPU cores for parallel compilation
+NPROC = $(shell nproc)
 
 # Commands
 
-all: $(TEST)
-	./$(TEST)
+all: $(BUILD_DIR)
+	@cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) .. && cmake --build . -j$(NPROC)
+	@cd $(BUILD_DIR) && ctest --output-on-failure
 
-$(TEST): $(TEST_O)
-	$(CC) $^ -o $@
 
-test/%.o: test/%.cpp
-	$(CC) $(CPPFLAGS) $^ -o $@ -Itest/include -Iinclude
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
 
 clean:
-	@rm -rf $(TEST_O)
-	@echo "Test objects cleaned!"
+	@rm -rf $(BUILD_DIR)
+	@echo "Build directory cleaned!"
 
-fclean: clean
-	@rm -rf $(TEST)
-	@echo "Test executable cleaned"
+re: clean all
 
-re: fclean all
-
+# Module generation and deletion utilities
 generate:
 	@$(call CHECK_VAR_TMP,generate) \
 	FILES=`find . -name "$$module*.cpp" -o -name "$$module*.hpp" -o -name "$$module*.o"`;\
@@ -56,7 +38,7 @@ generate:
 	fi;\
 	if [ -n "$$module" ]; then \
 		UPPER=$$(echo $$module | tr '[:lower:]' '[:upper:]'); \
-		mkdir -p include test/include;\
+		mkdir -p include/feather test/include;\
 		echo '/*--- Header file for '$$module' ---*/' > include/feather/$$module.hpp;\
 		echo '' >> include/feather/$$module.hpp;\
 		echo '#ifndef '"$$UPPER"'_HPP' >> include/feather/$$module.hpp; \
@@ -74,27 +56,14 @@ generate:
 		echo '#include <feather/'"$$module"'.hpp>' >> test/include/$${module}_test.hpp; \
 		echo '' >> test/include/$${module}_test.hpp; \
 		echo '#endif' >> test/include/$${module}_test.hpp; \
-		echo "Created src/$$module.cpp, include/$$module.hpp, test/$${module}_test.cpp and test/include/$${module}_test.hpp"; \
-		sed -i -e "/^SRCS[[:space:]]*=/ s/$$/ $$module/" Makefile; \
-		echo "Updated SRCS in Makefile";\
-		sed -i "1i #include <${module}_test.hpp>" ./test/main_test.cpp; \
+		echo "Created include/feather/$$module.hpp, test/$${module}_test.cpp and test/include/$${module}_test.hpp"; \
 		sed -i "9i #include <feather/${module}.hpp>" ./include/feather.hpp; \
-		echo "Updated #include in test/main_test.cpp";\
+		echo "Updated #include in include/feather.hpp";\
+		sed -i "s/set(TEST_SOURCES/set(TEST_SOURCES\n    ${module}_test.cpp/" ./test/CMakeLists.txt;\
+		echo "Updated test/CMakeLists.txt with new test sources!";\
+		echo "Don't forget to update CMakeLists.txt if you need any additional configuration!";\
 	else\
 		echo "submodule routine is not implemented yet";\
-	#	mkdir -p src/$$submodule/include test/include;\
-	#	UPPER=$$(echo $$submodule | tr '[:lower:]' '[:upper:]'); \
-	#	echo '#include "./include/'"$$submodule"'.hpp"' > src/$$submodule/$$submodule.cpp;\
-	#	echo '#ifndef '"$$UPPER"'_HPP' > src/$$submodule/include/$$submodule.hpp;\
-	#	echo '#define '"$$UPPER"'_HPP' >> src/$$submodule/include/$$submodule.hpp;\
-	#	echo '' >> src/$$submodule/include/$$submodule.hpp;\
-	#	echo '#endif' >> src/$$submodule/include/$$submodule.hpp;\
-	#	echo '#include "./include/'"$$module"'.hpp"' > test/$${module}_test.cpp; \
-	#	echo '#ifndef '"$$UPPER"'_TEST_HPP' > test/include/$${module}_test.hpp; \
-	#	echo '#define '"$$UPPER"'_TEST_HPP' >> test/include/$${module}_test.hpp; \
-	#	echo '' >> test/include/$${module}_test.hpp; \
-	#	echo '#include "../../include/'"$$module"'.hpp"' >> test/include/$${module}_test.hpp; \
-	#	echo '#endif' >> test/include/$${module}_test.hpp; \
 	fi;
 
 delete:
@@ -108,9 +77,9 @@ delete:
 			exit 0;\
 		fi;\
 		echo "$$FILES" | xargs rm -f; \
-		sed -i "s/\b$$module\b//g" Makefile; \
-		sed -i "/#include \"\.\/include\/${module}_test.hpp\"/d" test/main_test.cpp; \
-		echo "Removed files for $$module and updated Makefile and test/main_test.cpp";\
+		echo "Removed files for $$module";\
+		sed -i "s/    ${module}_test.cpp//" ./test/CMakeLists.txt;\
+		echo "Updated test/CMakeLists.txt to remove test sources!";\
 	elif [ -n "$$submodule" ]; then \
 		echo "submodule routine not implemented yet";\
 		exit 0;\
@@ -119,7 +88,14 @@ delete:
 		exit 1;\
 	fi;
 
-clear: # To be used when you want to clear before you make re.
+clear:
 	clear
 
-.PHONY: all test clean fclean re generate delete clear
+define CHECK_VAR_TMP
+if [[ -z "$$module" && -z "$$submodule" ]]; then \
+	echo "Usage: make $(1) module=<module or submodule name>";\
+	exit 1;\
+fi;
+endef
+
+.PHONY: all clean re generate delete clear

@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Boost REQUIRED)
+
+# Include the main targets
+include("${CMAKE_CURRENT_LIST_DIR}/feather-targets.cmake") 

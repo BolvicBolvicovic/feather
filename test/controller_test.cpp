@@ -1,3 +1,3 @@
 /*--- Code file for test controller ---*/
 
-#include <controller_test.hpp>
+#include "test_pch.hpp"
