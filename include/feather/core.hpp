@@ -64,17 +64,14 @@ namespace http = httplib;
 */
 #define pipe <operatorpipe>
 #define bind(func, ...) [&](auto const& _pipe_val) { return func(_pipe_val __VA_OPT__(,) __VA_ARGS__); }
-#define Mbind(func, ...) [&](auto&& _pipe_val) { return func(std::move(_pipe_val) __VA_OPT__(,) __VA_ARGS__); }
 
 const struct pipe_ {} operatorpipe;
 
 template <typename T>
 struct PipeProxy
 {
-    std::optional<std::reference_wrapper<T const>> t_;
-    T m_;
-    PipeProxy(T const& t): t_(std::cref(t)) {}
-    PipeProxy(T&& m): t_(std::nullopt), m_(std::move(m)) {}
+    T const& t_;
+    PipeProxy(T const& t): t_(t) {}
 };
 
 template <typename T>
@@ -83,45 +80,11 @@ PipeProxy<T> const operator<(T const& lhs, pipe_ const&)
     return PipeProxy<T>(lhs);
 }
 
-template <typename T>
-PipeProxy<T> operator<(T&& lhs, pipe_ const&)
-{
-    return PipeProxy<T>(std::move(lhs));
-}
-
 template <typename V, typename F>
-auto operator>(PipeProxy<V> const& value, F func) -> decltype(func((*value.t_).get()))
+auto operator>(PipeProxy<V> const& value, F func) -> decltype(func(value.t_))
 {
-    return func((*value.t_).get());
+    return func(value.t_);
 }
-
-template <typename V, typename F>
-auto operator>(PipeProxy<V>&& value, F&& func) -> decltype(func(std::forward<V>(value.m_)))
-{
-    return func(std::forward<V>(value.m_));
-}
-
-/*--- MCHAIN ---*/
-/*
-    Syntax sugar for pipe Mbind(func, args).
-    arg is moved.
-    As the argument and the function are moved, the enclosing function cannot be referenced in a lambda body unless it is captured.
-    For this reason MCHAIN and Mbind does not work with closures as the macro does not capture any reference.
-    However, if there is only one argument to the closure, then you can use pipe.
-
-    Usage:
-
-    auto closure = [](auto&& arg, int c) { return do_something(std::move(arg), c); };
-    auto solo_clo = [](auto&& arg) { return do_something(std::move(arg)); };
-
-    auto res = 
-        std::move(arg)
-            MCHAIN( first_func )
-            MCHAIN( second_func, arg2, arg3 )
-            pipe solo_clo
-            pipe [&closure](auto&& _arg) { return closure(std::move(_arg), 42); };
-*/
-#define MCHAIN(...) pipe Mbind(__VA_ARGS__)
 
 /*--- CHAIN ---*/
 /*
@@ -1376,7 +1339,7 @@ public:
 
         Returns an error if the connection has already been sent, chunked or upgraded. 
     */
-    static Result<Conn const> merge_resp_headers(Conn const& conn, http::Headers&& headers)
+    static Result<Conn const> merge_resp_headers(Conn const& conn, http::Headers const& headers)
     {
         if (std::holds_alternative<Sent>(conn.state)
             || std::get<Unsent>(conn.state) == Unsent::CHUNKED
@@ -1386,10 +1349,10 @@ public:
         }
 
         Conn new_conn(conn);
-        for (auto&& hd : headers)
+        for (auto const& hd : headers)
         {
             new_conn.resp_headers.erase(hd.first);
-            new_conn.resp_headers.insert(std::move(hd));
+            new_conn.resp_headers.insert(hd);
         }
         return { ResultType::Ok, new_conn };
     }
@@ -1407,8 +1370,10 @@ public:
 
         Returns an error if the connection has already been sent, chunked or upgraded.
 
+        The headers variable is not const because the merge method does not take a const reference.
+        Read the documentation of std::unordered_multimap::merge for more information.
     */
-    static Result<Conn const> prepend_resp_header(Conn const& conn, http::Headers&& headers)
+    static Result<Conn const> prepend_resp_header(Conn const& conn, http::Headers& headers)
     {
         if (std::holds_alternative<Sent>(conn.state)
             || std::get<Unsent>(conn.state) == Unsent::CHUNKED
@@ -1418,7 +1383,7 @@ public:
         }
 
         Conn new_conn(conn);
-        new_conn.resp_headers.merge(std::move(headers));
+        new_conn.resp_headers.merge(headers);
         return { ResultType::Ok, new_conn };
     }
 
@@ -1665,7 +1630,7 @@ public:
 
         new_conn.state = Unsent::SET;
         new_conn.status = std::make_optional(status);
-        new_conn.req_body = ShareStr(body);
+        new_conn.resp_body = ShareStr(body);
 
         return new_conn;
     }

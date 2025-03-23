@@ -238,21 +238,22 @@ SCENARIO("Pipeline Operations", "[core]") {
             };
 
             buildFirstConn()
-                MCHAIN(Conn::assign, "test2", 21)
-                pipe bind(Conn::assign, "test_assign", 42)
-                pipe [](Conn const& c) { return Conn::put_session(c, "test_header", "42"); }
-                pipe assert_conn;
+                CHAIN(Conn::assign, "test2", 21)
+                CHAIN(bind, Conn::assign, "test_assign", 42)
+                CHAIN(bind, [](Conn const& c) { return Conn::put_session(c, "test_header", "42"); })
+                CHAIN(bind, assert_conn);
         }
 
         WHEN("Using string pipelines") {
             std::string arg = "42";
-            auto result = std::move(arg)
-                MCHAIN(std::operator+, " is the answer")
-                MCHAIN(std::operator+, " to everything!");
+            auto result =
+                arg
+                CHAIN(std::operator+, " is the answer")
+                CHAIN(std::operator+, " to everything!");
 
             THEN("String operations are properly chained") {
                 REQUIRE_THAT(result, Equals("42 is the answer to everything!"));
-                REQUIRE_THAT(arg, Equals("")); // Moved from
+                REQUIRE_THAT(arg, Equals("42"));
             }
         }
     }
@@ -354,7 +355,7 @@ SCENARIO("Response Body Management", "[core]") {
 
             THEN("Response is properly set") {
                 REQUIRE(resp_conn.status.value() == 200);
-                REQUIRE_THAT(*resp_conn.req_body, Equals("Hello World"));
+                REQUIRE_THAT(*resp_conn.resp_body, Equals("Hello World"));
                 REQUIRE(std::holds_alternative<Unsent>(resp_conn.state));
                 REQUIRE(std::get<Unsent>(resp_conn.state) == Unsent::SET);
             }
@@ -497,7 +498,7 @@ SCENARIO("Response Header Management with Multiple Headers", "[core]") {
                 {"content-type", "application/json"},
                 {"cache-control", "no-cache"}
             };
-            auto result = Conn::prepend_resp_header(initial_conn, std::move(headers));
+            auto result = Conn::prepend_resp_header(initial_conn, headers);
 
             THEN("Headers are properly prepended") {
                 REQUIRE(result.first == core::ResultType::Ok);

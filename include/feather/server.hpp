@@ -20,8 +20,10 @@ struct Server
         ConnectionHdl                   hdl;
     };
 
-    private:
+    public:
         WebSocketServer                                     server;
+        boost::asio::io_service                            io_service;
+    private:
         std::mutex                                          conn_lock;
         boost::uuids::random_generator                      uuid_generator;
         std::function<plug::Conn const(plug::Conn const&)>  router;
@@ -32,7 +34,7 @@ struct Server
         router(router::router_handler)
         {
             server.clear_access_channels(websocketpp::log::alevel::all);
-            server.init_asio();
+            server.init_asio(&io_service);
 
             server.set_http_handler([this](ConnectionHdl hdl)
             {
@@ -270,6 +272,50 @@ struct Server
             req.body.erase(req.body.rfind("\n"));
 
             return {ResultType::Ok, req};
+        }
+
+        /*- start -*/
+        /*
+            Start the server.
+            Server cannot be const because of the server.listen()
+        */
+        static void start(Server& server, std::string const& host, uint16_t const& port)
+        {
+            try {
+                // Configure server endpoint
+                server.server.set_reuse_addr(true);
+                
+                // Set up the address
+                boost::asio::ip::address addr;
+                if (host.empty()) {
+                    addr = boost::asio::ip::address_v4::any();
+                } else {
+                    addr = boost::asio::ip::make_address(host == "localhost" ? "127.0.0.1" : host);
+                }
+                
+                // Configure server
+                server.server.listen(addr, port);
+                server.server.start_accept();
+            } catch (const std::exception& e) {
+                std::cerr << "Server configuration error: " << e.what() << std::endl;
+                throw;
+            }
+        }
+
+        /*- stop -*/
+        /*
+            Stop the server.
+            Server cannot be const because of the server.stop()
+        */
+        static void stop(Server& server)
+        {
+            try {
+                server.server.stop();
+                server.io_service.stop();
+            } catch (const std::exception& e) {
+                std::cerr << "Server stop error: " << e.what() << std::endl;
+                throw;
+            }
         }
 }; // struct Server
 

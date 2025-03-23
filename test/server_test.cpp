@@ -92,3 +92,83 @@ SCENARIO("Server Cookie Management", "[server]") {
         }
     }
 }
+
+SCENARIO("Server Start Configuration", "[server]") {
+    GIVEN("A server instance") {
+        Server server;
+        std::thread server_thread;
+        bool server_running = false;
+
+        WHEN("Starting the server with host and port") {
+            std::string const host = "localhost";
+            uint16_t const port = 8080;
+            
+            // Start server in a separate thread
+            server_thread = std::thread([&server, &server_running, host, port]() {
+                try {
+                    // Reset io_service before starting
+                    server.io_service.reset();
+                    
+                    // Start the server
+                    Server::start(server, host, port);
+                    server_running = true;
+                    
+                    // Run the server's event loop
+                    server.io_service.run();
+                } catch (const std::exception& e) {
+                    std::cerr << "Server error: " << e.what() << std::endl;
+                    server_running = false;
+                }
+            });
+
+            // Give the server a moment to start
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            THEN("Server is running and accepting connections") {
+                REQUIRE(server_running == true);
+            }
+
+            // Clean up
+            Server::stop(server);
+            if (server_thread.joinable()) {
+                server_thread.join();
+            }
+        }
+
+        WHEN("Starting the server with empty host and port") {
+            std::string const host = "";
+            uint16_t const port = 8080;
+            
+            // Start server in a separate thread
+            server_thread = std::thread([&server, &server_running, host, port]() {
+                try {
+                    // Reset io_service before starting
+                    server.io_service.reset();
+                    
+                    // Start the server
+                    Server::start(server, host, port);
+                    server_running = true;
+                    
+                    // Run the server's event loop
+                    server.io_service.run();
+                } catch (const std::exception& e) {
+                    std::cerr << "Server error: " << e.what() << std::endl;
+                    server_running = false;
+                }
+            });
+
+            // Give the server a moment to start
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            THEN("Server is running and accepting connections on all interfaces") {
+                REQUIRE(server_running == true);
+            }
+
+            // Clean up
+            Server::stop(server);
+            if (server_thread.joinable()) {
+                server_thread.join();
+            }
+        }
+    }
+}

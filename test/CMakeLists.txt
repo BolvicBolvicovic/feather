@@ -26,7 +26,7 @@ target_precompile_headers(test_pch
 # Configure PCH compilation settings
 set_target_properties(test_pch PROPERTIES JOB_POOL_COMPILE "pch_pool")
 set(CMAKE_JOB_POOL_PRECOMPILE_HEADER "pch_pool")
-set_property(GLOBAL PROPERTY JOB_POOLS pch_pool=1)  # Only use 1 core for PCH compilation
+set_property(GLOBAL PROPERTY JOB_POOLS pch_pool=1)
 
 target_include_directories(test_pch
     INTERFACE
