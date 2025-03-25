@@ -1,0 +1,566 @@
+#!/bin/bash
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Print usage
+usage() {
+    echo "Usage: fthr new [options] project_name"
+    echo
+    echo "Options:"
+    echo "  --no-git        Skip git initialization"
+    echo "  --no-deps       Skip dependency installation"
+    echo "  -h, --help      Show this help message"
+    echo
+    echo "Example:"
+    echo "  fthr new my_app"
+    echo "  fthr new my_app --no-git"
+    echo "  fthr new my_app --no-deps"
+}
+
+# Print error and exit
+error() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+# Print success message
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+# Print info message
+info() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+# Create directory structure
+create_structure() {
+    local project_name=$1
+    local project_dir=$2
+
+    # Create main project directory
+    mkdir -p "$project_dir"
+    cd "$project_dir" || error "Failed to change to project directory"
+
+    # Create directory structure
+    mkdir -p src/{controllers,models,views,templates,static/{css,js,img}}
+    mkdir -p test/{controllers,models,views}
+    mkdir -p config
+    mkdir -p lib
+    mkdir -p priv/{static,templates}
+
+    # Create main source files
+    cat > src/main.cpp << 'EOL'
+#include <feather/core.hpp>
+#include <feather/controller.hpp>
+#include <feather/router.hpp>
+#include <feather/server.hpp>
+#include "config/router.hpp"
+#include <iostream>
+
+int main(int argc, char* argv[]) {
+    try {
+        // Configure router with scopes and pipelines
+        config::configure_router();
+
+        // Initialize server
+        auto server = feather::server::Server::fetch_instance();
+        
+        // Start server
+        server
+            CHAIN(feather::server::Server::port, 3000)
+            CHAIN(feather::server::Server::start);
+
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+}
+EOL
+
+    # Create home controller
+    cat > src/controllers/home_controller.hpp << 'EOL'
+#ifndef HOME_CONTROLLER_HPP
+#define HOME_CONTROLLER_HPP
+
+#include <feather/controller.hpp>
+#include <feather/core.hpp>
+
+namespace controllers {
+    using namespace feather::controller;
+    using namespace feather::core;
+
+    struct HomeController {
+        static Conn const index(Conn const& conn) {
+            json data = {
+                {"title", "Welcome to Feather"},
+                {"content", "This is your new Feather application!"}
+            };
+            return render(conn, "home/index", data);
+        }
+
+        static Conn const about(Conn const& conn) {
+            json data = {
+                {"title", "About"},
+                {"content", "About page content"}
+            };
+            return render(conn, "home/about", data);
+        }
+
+        static Conn const contact(Conn const& conn) {
+            json data = {
+                {"title", "Contact"},
+                {"content", "Contact page content"}
+            };
+            return render(conn, "home/contact", data);
+        }
+    };
+}
+
+#endif
+EOL
+
+    # Create example templates
+    mkdir -p src/templates/home
+    cat > src/templates/home/index.html << 'EOL'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+    <main>
+        <h1>{{ title }}</h1>
+        <p>{{ content }}</p>
+    </main>
+</body>
+</html>
+EOL
+
+    cat > src/templates/home/about.html << 'EOL'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+    <main>
+        <h1>{{ title }}</h1>
+        <p>{{ content }}</p>
+    </main>
+</body>
+</html>
+EOL
+
+    cat > src/templates/home/contact.html << 'EOL'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+    <main>
+        <h1>{{ title }}</h1>
+        <p>{{ content }}</p>
+    </main>
+</body>
+</html>
+EOL
+
+    # Create basic CSS
+    cat > src/static/css/style.css << 'EOL'
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+}
+
+header {
+    background-color: #333;
+    color: white;
+    padding: 1rem;
+}
+
+nav a {
+    color: white;
+    text-decoration: none;
+    margin-right: 1rem;
+}
+
+nav a:hover {
+    text-decoration: underline;
+}
+
+main {
+    padding: 2rem;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+h1 {
+    color: #333;
+    margin-bottom: 1rem;
+}
+EOL
+
+    # Create router configuration
+    cat > src/config/router.hpp << 'EOL'
+#ifndef ROUTER_CONFIG_HPP
+#define ROUTER_CONFIG_HPP
+
+#include <feather/router.hpp>
+#include <feather/core.hpp>
+
+namespace config {
+    using namespace feather::router;
+    using namespace feather::core;
+
+    inline void configure_router() {
+        auto router = Router::fetch_instance();
+
+        // Define pipelines
+        router
+            CHAIN(Router::pipeline, "browser",
+                (CALLBACK_PLINE {
+                    PLUG(Conn::accepts, {"html"});
+                    PLUG(Conn::fetch_session);
+                    PLUG(Conn::fetch_flash);
+                    PLUG(Conn::put_secure_browser_headers);
+                    END_PLINE;
+                }))
+            CHAIN(Router::pipeline, "api",
+                (CALLBACK_PLINE {
+                    PLUG(Conn::accepts, {"json"});
+                    END_PLINE;
+                }));
+
+        // Define scopes
+        router
+            CHAIN(Router::scope, "/",
+                (CALLBACK_SCOPE {
+                    PIPE_THROUGH("browser");
+                    GET("/", "home_controller#index");
+                    GET("/about", "home_controller#about");
+                    GET("/contact", "home_controller#contact");
+                    END_SCOPE;
+                }))
+            CHAIN(Router::scope, "/api",
+                (CALLBACK_SCOPE {
+                    PIPE_THROUGH("api");
+                    GET("/health", "api_controller#health");
+                    END_SCOPE;
+                }));
+    }
+}
+
+#endif
+EOL
+
+    # Create API controller
+    cat > src/controllers/api_controller.hpp << 'EOL'
+#ifndef API_CONTROLLER_HPP
+#define API_CONTROLLER_HPP
+
+#include <feather/controller.hpp>
+#include <feather/core.hpp>
+
+namespace controllers {
+    using namespace feather::controller;
+    using namespace feather::core;
+
+    struct ApiController {
+        static Conn const health(Conn const& conn) {
+            json data = {
+                {"status", "ok"},
+                {"timestamp", std::time(nullptr)}
+            };
+            return json(conn, data);
+        }
+    };
+}
+
+#endif
+EOL
+
+    # Create CMakeLists.txt
+    cat > CMakeLists.txt << EOL
+cmake_minimum_required(VERSION 3.15)
+project($project_name VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Find required packages
+find_package(Boost REQUIRED COMPONENTS system)
+find_package(nlohmann_json REQUIRED)
+find_package(inja REQUIRED)
+
+# Add source files
+file(GLOB_RECURSE SOURCES "src/*.cpp")
+file(GLOB_RECURSE HEADERS "src/*.hpp")
+
+# Create main executable
+add_executable(\${PROJECT_NAME} \${SOURCES} \${HEADERS})
+
+# Link libraries
+target_link_libraries(\${PROJECT_NAME} PRIVATE
+    feather::core
+    feather::controller
+    feather::router
+    feather::server
+    Boost::system
+    nlohmann_json::nlohmann_json
+    inja::inja
+)
+
+# Include directories
+target_include_directories(\${PROJECT_NAME} PRIVATE
+    \${CMAKE_SOURCE_DIR}/src
+    \${CMAKE_SOURCE_DIR}/src/config
+)
+
+# Copy static files and templates to build directory
+file(COPY \${CMAKE_SOURCE_DIR}/src/static DESTINATION \${CMAKE_BINARY_DIR})
+file(COPY \${CMAKE_SOURCE_DIR}/src/templates DESTINATION \${CMAKE_BINARY_DIR})
+
+# Add test directory
+add_subdirectory(test)
+EOL
+
+    # Create test CMakeLists.txt
+    cat > test/CMakeLists.txt << 'EOL'
+find_package(Catch2 REQUIRED)
+
+add_executable(${PROJECT_NAME}_test
+    test_main.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_test PRIVATE
+    Catch2::Catch2WithMain
+    ${PROJECT_NAME}
+)
+
+include(CTest)
+include(Catch)
+catch_discover_tests(${PROJECT_NAME}_test)
+EOL
+
+    # Create test main file
+    cat > test/test_main.cpp << 'EOL'
+#define CATCH_CONFIG_MAIN
+#include <catch2/catch_test_macros.hpp>
+#include <feather/core.hpp>
+#include <feather/controller.hpp>
+
+TEST_CASE("Initial test", "[example]") {
+    REQUIRE(true);
+}
+EOL
+
+    # Create .gitignore
+    cat > .gitignore << 'EOL'
+# Build directory
+build/
+out/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Compiled files
+*.o
+*.obj
+*.exe
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# Dependencies
+vcpkg_installed/
+EOL
+
+    # Create README.md
+    cat > README.md << EOL
+# $project_name
+
+A Feather web application.
+
+## Building
+
+\`\`\`bash
+mkdir build && cd build
+cmake ..
+make
+\`\`\`
+
+## Running
+
+\`\`\`bash
+./$project_name
+\`\`\`
+
+The server will start on http://localhost:3000
+
+## Testing
+
+\`\`\`bash
+cd build
+ctest
+\`\`\`
+
+## Project Structure
+
+- \`src/controllers/\` - Controller files
+- \`src/models/\` - Data models
+- \`src/views/\` - View logic
+- \`src/templates/\` - Template files
+- \`src/static/\` - Static assets (CSS, JS, images)
+- \`src/config/\` - Configuration files (including router)
+- \`test/\` - Test files
+- \`config/\` - Configuration files
+- \`lib/\` - Third-party libraries
+- \`priv/\` - Private application files
+
+## Router Configuration
+
+The application uses scopes and pipelines for route organization:
+
+### Pipelines
+- \`browser\`: Handles web browser requests
+  - Accepts HTML
+  - Manages sessions
+  - Handles flash messages
+  - Sets secure browser headers
+- \`api\`: Handles API requests
+  - Accepts JSON
+
+### Scopes
+- \`/\`: Web routes
+  - Home page
+  - About page
+  - Contact page
+- \`/api\`: API routes
+  - Health check endpoint
+EOL
+
+    success "Created project structure!"
+}
+
+# Initialize git repository
+init_git() {
+    local project_dir=$1
+    cd "$project_dir" || error "Failed to change to project directory"
+    
+    git init
+    git add .
+    git commit -m "Initial commit"
+    
+    success "Initialized git repository!"
+}
+
+# Main function
+main() {
+    local project_name=""
+    local init_git_repo=true
+    local install_deps=true
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            new)
+                shift
+                project_name=$1
+                shift
+                ;;
+            --no-git)
+                init_git_repo=false
+                shift
+                ;;
+            --no-deps)
+                install_deps=false
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                ;;
+        esac
+    done
+
+    # Check if project name is provided
+    if [ -z "$project_name" ]; then
+        error "Project name is required"
+    fi
+
+    # Check if project name is valid
+    if [[ ! "$project_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
+        error "Invalid project name. Use only letters, numbers, and underscores. Must start with a letter."
+    fi
+
+    # Create project directory
+    local project_dir="$project_name"
+    if [ -d "$project_dir" ]; then
+        error "Directory '$project_dir' already exists"
+    fi
+
+    # Create project structure
+    create_structure "$project_name" "$project_dir"
+
+    # Initialize git if requested
+    if [ "$init_git_repo" = true ]; then
+        init_git "$project_dir"
+    fi
+
+    success "Project '$project_name' created successfully!"
+    info "Next steps:"
+    echo "  cd $project_name"
+    echo "  mkdir build && cd build"
+    echo "  cmake .."
+    echo "  make"
+    echo "  ./$project_name"
+    echo
+    info "The server will start on http://localhost:3000"
+}
+
+# Run main function with all arguments
+main "$@" 
