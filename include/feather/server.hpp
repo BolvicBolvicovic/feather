@@ -26,12 +26,9 @@ struct Server
     private:
         std::mutex                                          conn_lock;
         boost::uuids::random_generator                      uuid_generator;
-        std::function<plug::Conn const(plug::Conn const&)>  router;
         std::unordered_map<std::string, User>               connections;
     public:
         Server()
-        :
-        router(router::router_handler)
         {
             server.clear_access_channels(websocketpp::log::alevel::all);
             server.init_asio(&io_service);
@@ -68,7 +65,7 @@ struct Server
 
                 }(Conn(std::move(req_cpy), session));
                 
-                auto ready_for_resp = router(conn);
+                auto ready_for_resp = router::Router::handler(conn);
 
                 auto response = server.get_con_from_hdl(hdl)->get_response();
                 
@@ -175,7 +172,7 @@ struct Server
 
                 Conn conn(std::move(req), user.session);
                 conn.state = Unsent::UPGRADED;
-                router(conn);
+                router::Router::handler(conn);
             });
         }
         ~Server() = default;

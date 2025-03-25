@@ -35,6 +35,9 @@ using RouterMultiMap = core::functional::multimap<std::string, Scope>;
     Helper struct for the user to define a pipeline and routes.
     Not mendatory but strongly recommended.
 
+    Router is a singleton. Therefor all its static methods directly modify the router itself.
+    The reason behind this design is that they only register anonymous functions when we initialize it with a custom user defined initialize function.
+
     Usage:
 
     #include "my_plugs.hpp"
@@ -87,25 +90,31 @@ struct Router
 {
     using Pipeline = std::function<RouterVecTransient&(RouterVecTransient&)>;
     using IntoScope = std::function<Scope(Scope&&)>;
+    using RouterInstance = std::shared_ptr<Router>;
+private:
+    static inline RouterInstance instance = nullptr;
+    Router() = default;
 public:
     RouterMap       pipelines;
     RouterMultiMap  scopes;
-    Router()              = default;
-    Router(Router&&)      = default;
-    Router(Router const& other) :
-    pipelines(other.pipelines),
-    scopes(other.scopes){}
     ~Router()             = default;
 
-    Router& operator=(Router const& other)
+    Router& operator=(Router const& other) = delete;
+
+    /*- fetch_instance -*/
+    /*
+        Request the instance of the singleton Router.
+        If it is the first request, initialize the instance.
+    */
+    static RouterInstance fetch_instance()
     {
-        if (this != &other)
+        if (!instance)
         {
-            pipelines = other.pipelines;
-            scopes = other.scopes;
+            instance = RouterInstance(new Router());
         }
-        return *this;
+        return instance;
     }
+
     /*- pipeline -*/
     /*
         Once a request arrives at the Phoenix router,
@@ -116,32 +125,30 @@ public:
         Once a pipeline is defined, it can be piped through per scope.
 
     */
-    static Router const pipeline(
-        Router const&       router,
+    static RouterInstance pipeline(
+        RouterInstance      router,
         std::string const&  name,
         Pipeline            pl)
     {
-        Router new_router(router);
         RouterVecTransient new_pipeline{};
 
-        new_router.pipelines = new_router.pipelines.insert({name, pl(new_pipeline).persistent()});
+        router->pipelines = router->pipelines.insert({name, pl(new_pipeline).persistent()});
 
-        return new_router;
+        return router;
     }
 
     /*- scope -*/
     /*
         Register a scope and its routes to a router.
     */
-    static Router const scope(
-        Router const&       router,
+    static RouterInstance scope(
+        RouterInstance      router,
         std::string const&  name,
         IntoScope           handler
     )
     {
-        Router new_router(router);
-        new_router.scopes = new_router.scopes.insert({name, handler(Scope())});
-        return new_router;
+        router->scopes = router->scopes.insert({name, handler(Scope())});
+        return router;
     }
 
     /*- CALLBACK_PLINE -*/
@@ -179,10 +186,11 @@ public:
 { \
     feather::core::plug::Conn new_conn(conn); \
     std::vector<std::string> p_lines_as_vec{p_lines};\
+    feather::router::Router::RouterInstance instance = feather::router::Router::fetch_instance();\
 \
     for (auto const& p_name : p_lines_as_vec)\
     {\
-        for (auto const& pip : feather::router::router.pipelines[p_name])\
+        for (auto const& pip : instance->pipelines[p_name])\
         {\
             new_conn = pip(new_conn, {});\
         }\
@@ -214,22 +222,15 @@ public:
     */
 #define DEL(path, handler) scope.del = scope.del.insert({path, handler})
 
-
-}; // struct router
-
-/* router */
-/*
-    Static variable that holds the router of the application.
-*/
-static Router router;
-
-/*- router_handler -*/
+/*- handler -*/
 /*
     Route handler to register to the server.
 */
-inline plug::Conn const router_handler(plug::Conn const& conn)
+static plug::Conn const handler(plug::Conn const& conn)
 {
-    for (auto const& [scope_id, scopes] : router.scopes)
+    RouterInstance instance = fetch_instance();
+
+    for (auto const& [scope_id, scopes] : instance->scopes)
     {
         if (auto path_start = conn.request_path->find(scope_id); path_start == std::string::npos)
         {
@@ -263,11 +264,13 @@ inline plug::Conn const router_handler(plug::Conn const& conn)
                 }
             }
         }
-
     }
 
     return conn;
 }
+
+
+}; // struct router
 
 
 } // namespace router

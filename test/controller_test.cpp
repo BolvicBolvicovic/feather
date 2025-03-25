@@ -67,7 +67,14 @@ TEST_CASE("Controller response functions", "[controller]") {
         std::string template_path;
         try {
             template_path = create_test_template(template_content);
-            auto result = render(conn, template_path, data);
+            
+            // Register template with TemplateManager
+            auto tm =
+                TemplateManager::fetch_instance()
+                CHAIN(TemplateManager::add_template, "test_template", template_path);
+            
+            // Test normal rendering
+            auto result = render(conn, "test_template", data);
             
             REQUIRE(result.status.value() == 200);
             auto content_type_range = Conn::get_resp_header(result, "content-type");
@@ -76,6 +83,17 @@ TEST_CASE("Controller response functions", "[controller]") {
             REQUIRE(result.resp_body->find("<p>Hello World</p>") != std::string::npos);
             REQUIRE(result.resp_body->find("<span>42</span>") != std::string::npos);
             REQUIRE(result.resp_body->find("<div>Active</div>") != std::string::npos);
+
+            // Test raw rendering
+            auto raw_result = render(conn, template_content, data, true);
+            
+            REQUIRE(raw_result.status.value() == 200);
+            auto raw_content_type_range = Conn::get_resp_header(raw_result, "content-type");
+            REQUIRE(raw_content_type_range.first->second == "text/html");
+            REQUIRE(raw_result.resp_body->find("<h1>Test Page</h1>") != std::string::npos);
+            REQUIRE(raw_result.resp_body->find("<p>Hello World</p>") != std::string::npos);
+            REQUIRE(raw_result.resp_body->find("<span>42</span>") != std::string::npos);
+            REQUIRE(raw_result.resp_body->find("<div>Active</div>") != std::string::npos);
         } catch (const std::exception& e) {
             FAIL("Test failed with exception: " << e.what());
         }
@@ -106,13 +124,28 @@ TEST_CASE("Controller response functions", "[controller]") {
             </ul>
         )";
         
-        auto template_path = create_test_template(template_content);
-        auto result = render(conn, template_path, data);
+        std::string template_path = create_test_template(template_content);
+        
+        // Register template with TemplateManager
+        auto tm =
+            TemplateManager::fetch_instance()
+            CHAIN(TemplateManager::add_template, "list_template", template_path);
+        
+        // Test normal rendering
+        auto result = render(conn, "list_template", data);
         
         REQUIRE(result.status.value() == 200);
         REQUIRE(result.resp_body->find("<li>Item 1</li>") != std::string::npos);
         REQUIRE(result.resp_body->find("<li>Item 2</li>") != std::string::npos);
         REQUIRE(result.resp_body->find("<li>Item 3</li>") != std::string::npos);
+
+        // Test raw rendering
+        auto raw_result = render(conn, template_content, data, true);
+        
+        REQUIRE(raw_result.status.value() == 200);
+        REQUIRE(raw_result.resp_body->find("<li>Item 1</li>") != std::string::npos);
+        REQUIRE(raw_result.resp_body->find("<li>Item 2</li>") != std::string::npos);
+        REQUIRE(raw_result.resp_body->find("<li>Item 3</li>") != std::string::npos);
         
         std::filesystem::remove(template_path);
     }
@@ -140,13 +173,28 @@ TEST_CASE("Controller response functions", "[controller]") {
             </div>
         )";
         
-        auto template_path = create_test_template(template_content);
-        auto result = render(conn, template_path, data);
+        std::string template_path = create_test_template(template_content);
+        
+        // Register template with TemplateManager
+        auto tm =
+            TemplateManager::fetch_instance()
+            CHAIN(TemplateManager::add_template, "user_template", template_path);
+        
+        // Test normal rendering
+        auto result = render(conn, "user_template", data);
         
         REQUIRE(result.status.value() == 200);
         REQUIRE(result.resp_body->find("<h2>John Doe</h2>") != std::string::npos);
         REQUIRE(result.resp_body->find("Age: 30") != std::string::npos);
         REQUIRE(result.resp_body->find("Address: 123 Main St, Anytown") != std::string::npos);
+
+        // Test raw rendering
+        auto raw_result = render(conn, template_content, data, true);
+        
+        REQUIRE(raw_result.status.value() == 200);
+        REQUIRE(raw_result.resp_body->find("<h2>John Doe</h2>") != std::string::npos);
+        REQUIRE(raw_result.resp_body->find("Age: 30") != std::string::npos);
+        REQUIRE(raw_result.resp_body->find("Address: 123 Main St, Anytown") != std::string::npos);
         
         std::filesystem::remove(template_path);
     }
@@ -169,12 +217,26 @@ TEST_CASE("Controller response functions", "[controller]") {
             {% endif %}
         )";
         
-        auto template_path = create_test_template(template_content);
-        auto result = render(conn, template_path, data);
+        std::string template_path = create_test_template(template_content);
+        
+        // Register template with TemplateManager
+        auto tm =
+            TemplateManager::fetch_instance()
+            CHAIN(TemplateManager::add_template, "conditional_template", template_path);
+        
+        // Test normal rendering
+        auto result = render(conn, "conditional_template", data);
         
         REQUIRE(result.status.value() == 200);
         REQUIRE(result.resp_body->find("<div class=\"admin-panel\">Admin Panel</div>") != std::string::npos);
         REQUIRE(result.resp_body->find("<div class=\"no-permissions\">No Permissions</div>") != std::string::npos);
+
+        // Test raw rendering
+        auto raw_result = render(conn, template_content, data, true);
+        
+        REQUIRE(raw_result.status.value() == 200);
+        REQUIRE(raw_result.resp_body->find("<div class=\"admin-panel\">Admin Panel</div>") != std::string::npos);
+        REQUIRE(raw_result.resp_body->find("<div class=\"no-permissions\">No Permissions</div>") != std::string::npos);
         
         std::filesystem::remove(template_path);
     }
@@ -207,10 +269,6 @@ TEST_CASE("Controller response functions", "[controller]") {
         std::filesystem::path child_path = temp_dir / (unique_prefix + "_child.html");
         
         try {
-            std::cerr << "Temp directory: " << temp_dir.string() << std::endl;
-            std::cerr << "Base template path: " << base_path.string() << std::endl;
-            std::cerr << "Child template path: " << child_path.string() << std::endl;
-            
             // Create base template
             std::ofstream base_file(base_path, std::ios::out | std::ios::trunc);
             if (!base_file.is_open()) {
@@ -219,51 +277,42 @@ TEST_CASE("Controller response functions", "[controller]") {
             base_file << base_template;
             base_file.close();
             
-            // Verify base template was created
-            if (!std::filesystem::exists(base_path)) {
-                throw std::runtime_error("Base template file was not created");
-            }
-            if (std::filesystem::is_directory(base_path)) {
-                throw std::runtime_error("Base template path is a directory");
-            }
-            
-            // Create child template with explicit base template path
-            std::string child_template_with_path = R"(
-                {% extends "./base.html" %}
-                {% block header %}
-                    <h1>{{ title }}</h1>
-                {% endblock %}
-                {% block content %}
-                    <div>{{ content }}</div>
-                {% endblock %}
-            )";
+            // Create child template
+            std::string child_template = R"({% extends "base" %}
+            {% block header %}
+                <h1>{{ title }}</h1>
+            {% endblock %}
+            {% block content %}
+                <div>{{ content }}</div>
+            {% endblock %})";
             
             std::ofstream child_file(child_path, std::ios::out | std::ios::trunc);
             if (!child_file.is_open()) {
                 throw std::runtime_error("Failed to open child template file");
             }
-            child_file << child_template_with_path;
+            child_file << child_template;
             child_file.close();
             
-            // Verify child template was created
-            if (!std::filesystem::exists(child_path)) {
-                throw std::runtime_error("Child template file was not created");
-            }
-            if (std::filesystem::is_directory(child_path)) {
-                throw std::runtime_error("Child template path is a directory");
-            }
+            // Register templates with TemplateManager
+            auto tm =
+                TemplateManager::fetch_instance()
+                CHAIN(TemplateManager::add_template, "base", base_path.string())
+                CHAIN(TemplateManager::add_template, "child", child_path.string());
             
-            // Verify both files are in the same directory
-            if (base_path.parent_path() != child_path.parent_path()) {
-                throw std::runtime_error("Base and child templates must be in the same directory");
-            }
-            
-            auto result = render(conn, child_path.string(), data);
+            // Test normal rendering
+            auto result = render(conn, "child", data);
             
             REQUIRE(result.status.value() == 200);
             REQUIRE(result.resp_body->find("<title>Child Page</title>") != std::string::npos);
             REQUIRE(result.resp_body->find("<h1>Child Page</h1>") != std::string::npos);
             REQUIRE(result.resp_body->find("<div>This is the child content</div>") != std::string::npos);
+
+            // Test raw rendering (note: inheritance won't work with raw rendering)
+            auto raw_result = render(conn, child_template, data, true);
+            
+            REQUIRE(raw_result.status.value() == 200);
+            REQUIRE(raw_result.resp_body->find("<h1>Child Page</h1>") != std::string::npos);
+            REQUIRE(raw_result.resp_body->find("<div>This is the child content</div>") != std::string::npos);
         } catch (const std::exception& e) {
             FAIL("Test failed with exception: " << e.what());
         }
@@ -345,11 +394,11 @@ TEST_CASE("Controller error handling", "[controller]") {
         auto conn = test::buildFirstConn();
         json data;
         
-        auto result = render(conn, "nonexistent_template.html", data);
+        auto result = render(conn, "nonexistent_template", data);
         
         REQUIRE(result.status.value() == 500);
         auto content_type_range = Conn::get_resp_header(result, "content-type");
         REQUIRE(content_type_range.first->second == "text/plain");
-        REQUIRE(result.resp_body->find("Template rendering error: Template file not found") != std::string::npos);
+        REQUIRE(result.resp_body->find("Template rendering error") != std::string::npos);
     }
 }

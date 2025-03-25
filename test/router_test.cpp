@@ -10,8 +10,8 @@ using namespace Catch::Matchers;
 
 namespace {
     // Helper to create a basic router configuration
-    Router setupBasicRouter() {
-        return Router()
+    Router::RouterInstance setupBasicRouter() {
+        return Router::fetch_instance()
             CHAIN(Router::pipeline, "test1",
                 (CALLBACK_PLINE {
                     PLUG(Conn::fetch_cookies);
@@ -29,16 +29,16 @@ namespace {
 SCENARIO("Router Pipeline Configuration", "[router]") {
     GIVEN("A router with multiple pipelines") {
         WHEN("Configuring pipelines") {
-            router = setupBasicRouter();
+            auto router = setupBasicRouter();
             
             THEN("Pipelines are properly configured") {
-                REQUIRE(router.pipelines.find("test1") != nullptr);
-                REQUIRE(router.pipelines.find("test2") != nullptr);
+                REQUIRE(router->pipelines.find("test1") != nullptr);
+                REQUIRE(router->pipelines.find("test2") != nullptr);
             }
         }
 
         WHEN("Configuring scopes with pipelines") {
-            router = setupBasicRouter()
+            auto router = setupBasicRouter()
                 CHAIN(Router::scope, "/",
                     (CALLBACK_SCOPE {
                         PIPE_THROUGH("test1", "test2");
@@ -55,10 +55,10 @@ SCENARIO("Router Pipeline Configuration", "[router]") {
                     }));
 
             THEN("Router scopes are properly configured") {
-                REQUIRE(router.scopes["/"][0].pipeline != nullptr);
-                REQUIRE(router.scopes["/api"][0].pipeline != nullptr);
-                REQUIRE(router.scopes["/"][0].get.find("/posts/new") != nullptr);
-                REQUIRE(router.scopes["/api"][0].get.find("/posts") != nullptr);
+                REQUIRE(router->scopes["/"][0].pipeline != nullptr);
+                REQUIRE(router->scopes["/api"][0].pipeline != nullptr);
+                REQUIRE(router->scopes["/"][0].get.find("/posts/new") != nullptr);
+                REQUIRE(router->scopes["/api"][0].get.find("/posts") != nullptr);
             }
         }
     }
@@ -66,16 +66,16 @@ SCENARIO("Router Pipeline Configuration", "[router]") {
 
 SCENARIO("Router Request Handling", "[router]") {
     GIVEN("A configured router and a connection") {
-        router = setupBasicRouter()
+        auto router = setupBasicRouter()
             CHAIN(Router::scope, "/",
                 (CALLBACK_SCOPE {
-                    PIPE_THROUGH("test1");
+                    PIPE_THROUGH("test1", "test2");
                     GET("/users/123", nullptr);
                     END_SCOPE;
                 }));
 
         WHEN("Handling a GET request") {
-            Conn conn = buildFirstConn() pipe router_handler;
+            Conn conn = buildFirstConn() pipe Router::handler;
 
             THEN("Request method is preserved") {
                 REQUIRE_THAT(*conn.method, Equals("get"));
@@ -88,15 +88,7 @@ SCENARIO("Router Request Handling", "[router]") {
         }
 
         WHEN("Handling a request with multiple pipeline transformations") {
-            router = setupBasicRouter()
-                CHAIN(Router::scope, "/",
-                    (CALLBACK_SCOPE {
-                        PIPE_THROUGH("test1", "test2");
-                        GET("/users/123", nullptr);
-                        END_SCOPE;
-                    }));
-            
-            Conn conn = buildFirstConn() pipe router_handler;
+            Conn conn = buildFirstConn() pipe Router::handler;
 
             THEN("All pipeline transformations are applied in order") {
                 REQUIRE(conn.cookies.has_value());
@@ -107,7 +99,7 @@ SCENARIO("Router Request Handling", "[router]") {
         }
 
         WHEN("Handling a request for non-existent route") {
-            Conn conn = buildFirstErrorConn() pipe router_handler;
+            Conn conn = buildFirstErrorConn() pipe Router::handler;
 
             THEN("Connection is returned unchanged") {
                 REQUIRE_FALSE(conn.cookies.has_value());
