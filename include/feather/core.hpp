@@ -106,11 +106,12 @@ auto operator>(PipeProxy<V> const& value, F func) -> decltype(func(value.t_))
 namespace feather::core
 {
 
+/*--- s_list ---*/
+// A shortcut for a initializer list of strings
+using s_list = std::initializer_list<std::string>;
+
 namespace functional
 {
-
-/*--- reduce ---*/
-// Execute a 
 
 /*--- merge ---*/
 // Merges two immer::map into a single one.

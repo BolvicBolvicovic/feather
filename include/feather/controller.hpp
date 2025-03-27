@@ -80,7 +80,6 @@ struct TemplateManager
         
 };
 
-
     /*- render -*/
     /*
         Render a template and return the response.
@@ -148,7 +147,32 @@ Conn const render(Conn const& conn, std::string const& template_name, json const
             CHAIN( core::unwrap<Conn> )
             CHAIN( Conn::resp, 200, text );
     }
-    
+
+    /*- accepts -*/
+    /*
+        Return true if the client accepts the given mime types.
+    */
+    bool accepts(Conn const& conn, s_list const& mime_types)
+    {
+        return conn.req_headers.find("Accept") != conn.req_headers.end()
+            && conn.req_headers.at("Accept").find(mime_types) != std::string::npos;
+    }
+
+    /*- put_secure_browser_headers -*/
+    /*
+        Put the secure browser headers to the response.
+    */
+    Conn const put_secure_browser_headers(Conn const& conn)
+    {
+        return conn
+            CHAIN( Conn::put_resp_header, "X-Frame-Options", "SAMEORIGIN" )
+            CHAIN( Conn::put_resp_header, "X-XSS-Protection", "1; mode=block" )
+            CHAIN( Conn::put_resp_header, "X-Content-Type-Options", "nosniff" )
+            CHAIN( Conn::put_resp_header, "Referrer-Policy", "strict-origin-when-cross-origin" )
+            CHAIN( Conn::put_resp_header, "Content-Security-Policy", "default-src 'self'; img-src *; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; frame-src 'none'" )
+            CHAIN( Conn::put_resp_header, "Strict-Transport-Security", "max-age=31536000; includeSubDomains" )
+            CHAIN( Conn::put_resp_header, "X-Content-Security-Policy", "default-src 'self'; img-src *; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; frame-src 'none'" );
+    }
 }
 
 #endif
